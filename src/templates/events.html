@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-800">Events</h1>
+        <button onclick="showEventModal()" class="bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600">
+            Add Event
+        </button>
+    </div>
+
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <table class="min-w-full">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event ID</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event Name</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">City</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date Range</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Markup</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                {% if events %}
+                    {% for event in events %}
+                    <tr>
+                        <td class="px-6 py-4 whitespace-nowrap">{{ event.event_id }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">{{ event.event_name }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">{{ event.city_name}}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">{{ event.start_date }} to {{ event.end_date }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">{{ "%.2f"|format(event.markup) }}x</td>
+                        <td class="px-6 py-4 whitespace-nowrap space-x-2">
+                            <button onclick="editEvent('{{ event.id }}')" class="text-indigo-600 hover:text-indigo-900">Edit</button>
+                            <button onclick="deleteEvent('{{ event.id }}')" class="text-red-600 hover:text-red-900">Delete</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="5" class="px-6 py-4 text-center text-gray-500">
+                            No events found. Click "Add Event" to create one.
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add/Edit Event Modal -->
+<div id="eventModal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
+    <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+        <div class="mt-3">
+            <h3 class="text-lg font-medium leading-6 text-gray-900" id="modalTitle">Add Event</h3>
+            <form id="eventForm" class="mt-2 space-y-6">
+                <input type="hidden" id="eventId" name="id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Event ID</label>
+                    <input type="text" id="eventIdInput" name="event_id" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Event Name</label>
+                    <input type="text" id="eventName" name="event_name" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">City</label>
+                    <select id="city" name="city_id" required
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                        <option value="">Select a city</option>
+                        {% for city, city_id in cities.items() %}
+                            <option value="{{ city_id }}">{{ city }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Start Date</label>
+                    <input type="date" id="startDate" name="start_date" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">End Date</label>
+                    <input type="date" id="endDate" name="end_date" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Markup (e.g., 1.6 for 60% markup)</label>
+                    <input type="number" id="markup" name="markup" step="0.1" min="1.0" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                           value="1.6">
+                </div>
+                <div class="flex justify-end space-x-2">
+                    <button type="button" onclick="closeModal()"
+                            class="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            class="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600">
+                        Save
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function showEventModal(isEdit = false) {
+    document.getElementById('modalTitle').textContent = isEdit ? 'Edit Event' : 'Add Event';
+    if (!isEdit) {
+        document.getElementById('eventId').value = '';
+        document.getElementById('eventForm').reset();
+    }
+    document.getElementById('eventModal').classList.remove('hidden');
+}
+function closeModal() {
+    document.getElementById('eventModal').classList.add('hidden');
+}
+async function editEvent(id) {
+    const response = await fetch(`/api/events/${id}`);
+    if (response.ok) {
+        const event = await response.json();
+        document.getElementById('eventId').value = event.id;
+        document.getElementById('eventIdInput').value = event.event_id;
+        document.getElementById('eventName').value = event.event_name;
+        document.getElementById('city').value = event.city_id;
+        document.getElementById('startDate').value = event.start_date;
+        document.getElementById('endDate').value = event.end_date;
+        document.getElementById('markup').value = event.markup;
+        showEventModal(true);
+    }
+}
+document.getElementById('eventForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const id = formData.get('id');
+    const method = id ? 'PUT' : 'POST';
+    const url = id ? `/api/events/${id}` : '/api/events';
+    
+    const response = await fetch(url, {
+        method,
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            event_id: formData.get('event_id'),
+            event_name: formData.get('event_name'),
+            city_id: parseInt(formData.get('city_id')),
+            start_date: formData.get('start_date'),
+            end_date: formData.get('end_date'),
+            markup: parseFloat(formData.get('markup'))
+        })
+    });
+    
+    if (response.ok) {
+        location.reload();
+    } else {
+        alert('Error saving event');
+    }
+});
+async function deleteEvent(id) {
+    if (confirm('Are you sure you want to delete this event?')) {
+        const response = await fetch(`/api/events/${id}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Error deleting event');
+        }
+    }
+}
+
+// Add date validation
+document.getElementById('endDate').addEventListener('change', function() {
+    const startDate = document.getElementById('startDate').value;
+    const endDate = this.value;
+    
+    if (startDate && endDate && startDate > endDate) {
+        alert('End date must be after start date');
+        this.value = startDate;
+    }
+});
+
+document.getElementById('startDate').addEventListener('change', function() {
+    const endDate = document.getElementById('endDate').value;
+    if (endDate && this.value > endDate) {
+        document.getElementById('endDate').value = this.value;
+    }
+});
+</script>
+
+{% endblock %}

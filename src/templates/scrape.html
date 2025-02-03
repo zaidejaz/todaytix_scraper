@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <div class="bg-white rounded-lg shadow p-6">
+        <h1 class="text-2xl font-bold text-gray-800 mb-4">Scraper Control</h1>
+
+        <!-- Status Display -->
+        <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h2 class="text-lg font-semibold mb-2">Scraper Status</h2>
+            <div id="statusDisplay" class="space-y-2">
+                <p>Status: <span id="statusText" class="font-medium">{{ current_job.status if current_job else 'Not
+                        Running' }}</span></p>
+                <p>Last Run: <span id="lastRunText" class="font-medium">{{ current_job.last_run if current_job else
+                        'Never' }}</span></p>
+                <p>Next Run: <span id="nextRunText" class="font-medium">{{ current_job.next_run if current_job else 'Not
+                        Scheduled' }}</span></p>
+                <p>Events Processed: <span id="eventsProcessedText" class="font-medium">{{ current_job.events_processed
+                        if current_job else '0' }}</span></p>
+                <p>Total Tickets Found: <span id="ticketsFoundText" class="font-medium">{{
+                        current_job.total_tickets_found if current_job else '0' }}</span></p>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="mb-6 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Scrape Interval (minutes)</label>
+                <div class="mt-1 flex items-center space-x-2">
+                    <input type="number" id="intervalMinutes" min="1" value="20"
+                        class="rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
+                        {% if current_job and current_job.status=='running' %}disabled{% endif %}>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-between">
+            <button id="startButton" onclick="startScraper()" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">
+                Start Scraper
+            </button>
+            <button id="stopButton" onclick="stopScraper()" class="bg-red-500 text-white px-6 py-2 rounded hover:bg-red-600">
+                Stop Scraper
+            </button>
+        </div>
+
+        <div id="result" class="mt-4"></div>
+    </div>
+</div>
+
+<script>
+    let statusCheckInterval;
+
+    async function startScraper() {
+        const intervalMinutes = parseInt(document.getElementById('intervalMinutes').value);
+        if (intervalMinutes < 1) {
+            alert('Interval must be at least 1 minute');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/scrape/start', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ interval_minutes: intervalMinutes })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                updateUI({ status: 'running' });
+                startStatusChecks();
+            } else {
+                showError(data.message);
+            }
+        } catch (error) {
+            showError(error.message);
+        }
+    }
+
+    async function stopScraper() {
+        try {
+            const response = await fetch('/api/scrape/stop', {
+                method: 'POST'
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                updateUI({ status: 'stopped' });
+                stopStatusChecks();
+            } else {
+                showError(data.message);
+            }
+        } catch (error) {
+            showError(error.message);
+        }
+    }
+
+    async function checkStatus() {
+        try {
+            const response = await fetch('/api/scrape/status');
+            const data = await response.json();
+            updateUI(data);
+        } catch (error) {
+            console.error('Error checking status:', error);
+        }
+    }
+
+    function startStatusChecks() {
+        statusCheckInterval = setInterval(checkStatus, 5000);  // Check every 5 seconds
+    }
+
+    function stopStatusChecks() {
+        if (statusCheckInterval) {
+            clearInterval(statusCheckInterval);
+        }
+    }
+
+    function updateUI(data) {
+        const isRunning = data.status === 'running';
+        const isCompleted = data.status === 'completed';
+        const isStopped = data.status === 'stopped';
+
+        // Update buttons
+        document.getElementById('startButton').style.display = isRunning || isCompleted ? 'none' : 'inline-block';
+        document.getElementById('stopButton').style.display = !isRunning && !isCompleted ? 'none' : 'inline-block';
+        document.getElementById('intervalMinutes').disabled = isRunning;
+
+        // Update status display
+        document.getElementById('statusText').textContent = data.status || 'Not Running';
+        document.getElementById('lastRunText').textContent = data.last_run || 'Never';
+        document.getElementById('nextRunText').textContent = data.next_run || 'Not Scheduled';
+        document.getElementById('eventsProcessedText').textContent = data.events_processed || '0';
+        document.getElementById('ticketsFoundText').textContent = data.total_tickets_found || '0';
+    }
+
+    function showError(message) {
+        const result = document.getElementById('result');
+        result.innerHTML = `
+            <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4">
+                Error: ${message}
+            </div>
+        `;
+    }
+
+    // Initialize status checks if scraper is running
+    document.addEventListener('DOMContentLoaded', function () {
+        const currentStatus = '{{ current_job.status if current_job else "stopped" }}';
+        if (currentStatus === 'running') {
+            startStatusChecks();
+        }
+
+        // Initialize UI with current job data
+        updateUI({
+            status: currentStatus,
+            last_run: '{{ current_job.last_run if current_job else "" }}',
+            next_run: '{{ current_job.next_run if current_job else "" }}',
+            events_processed: '{{ current_job.events_processed if current_job else 0 }}',
+            total_tickets_found: '{{ current_job.total_tickets_found if current_job else 0 }}'
+        });
+    });
+</script>
+{% endblock %}
