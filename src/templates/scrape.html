@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto">
+<div class="max-w-7xl mx-auto">
     <div class="bg-white rounded-lg shadow p-6">
         <h1 class="text-2xl font-bold text-gray-800 mb-4">Scraper Control</h1>
 
@@ -35,15 +35,40 @@
         </div>
 
         <div class="flex items-center justify-between">
-            <button id="startButton" onclick="startScraper()" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">
+            <button id="startButton" onclick="startScraper()"
+                class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">
                 Start Scraper
             </button>
-            <button id="stopButton" onclick="stopScraper()" class="bg-red-500 text-white px-6 py-2 rounded hover:bg-red-600">
+            <button id="stopButton" onclick="stopScraper()"
+                class="bg-red-500 text-white px-6 py-2 rounded hover:bg-red-600">
                 Stop Scraper
             </button>
         </div>
 
-        <div id="result" class="mt-4"></div>
+        <div class="mt-8">
+            <h2 class="text-xl font-bold mb-4">Output Files</h2>
+            <div class="bg-white rounded-lg shadow overflow-x-auto">
+                <table class="min-w-full" id="filesTable">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Filename</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Created At</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Size</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Time Left</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        <!-- Files will be populated here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -161,5 +186,81 @@
             total_tickets_found: '{{ current_job.total_tickets_found if current_job else 0 }}'
         });
     });
+
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    function formatTimeLeft(ageHours) {
+        const hoursLeft = 24 - ageHours;
+        if (hoursLeft <= 0) return 'Expired';
+        return `${Math.floor(hoursLeft)} hours ${Math.round((hoursLeft % 1) * 60)} minutes`;
+    }
+
+    async function downloadFile(filename) {
+        try {
+            window.location.href = `/api/files/${encodeURIComponent(filename)}`;
+        } catch (error) {
+            alert('Error downloading file: ' + error.message);
+        }
+    }
+
+    async function updateFilesList() {
+        try {
+            const response = await fetch('/api/files');
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                const tbody = document.querySelector('#filesTable tbody');
+                tbody.innerHTML = '';
+
+                if (data.files.length === 0) {
+                    tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="px-6 py-4 text-center text-gray-500">
+                            No output files available
+                        </td>
+                    </tr>
+                `;
+                    return;
+                }
+
+                data.files.forEach(file => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">${file.name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${new Date(file.created_at).toLocaleString()}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${formatFileSize(file.size)}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${formatTimeLeft(file.age_hours)}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <button onclick="downloadFile('${file.name}')"
+                                class="text-indigo-600 hover:text-indigo-900">
+                            Download
+                        </button>
+                    </td>
+                `;
+                    tbody.appendChild(row);
+                });
+            }
+        } catch (error) {
+            console.error('Error updating files list:', error);
+        }
+    }
+
+    // Add this to your existing status update interval
+    setInterval(() => {
+        updateFilesList();
+    }, 60000); // Update every minute
+
+    // Initial load
+    document.addEventListener('DOMContentLoaded', () => {
+        updateFilesList();
+    });
+
+    
 </script>
 {% endblock %}

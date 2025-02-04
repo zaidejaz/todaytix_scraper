@@ -43,9 +43,16 @@ echo "📦 Installing Flask app dependencies..."
 cd "/home/$USER/todaytix_scraper"
 poetry install --no-dev --no-interaction --no-ansi
 
-# Step 5: Create necessary data directories
+# Step 5: Create necessary data directories if they don't exist
 echo "📂 Creating necessary data directories..."
-mkdir /home/$USER/todaytix_scraper/data/output
+OUTPUT_DIR="/home/$USER/todaytix_scraper/data/output"
+if [ ! -d "$OUTPUT_DIR" ]; then
+    mkdir -p "$OUTPUT_DIR"
+    echo "Created directory: $OUTPUT_DIR"
+else
+    echo "Directory already exists: $OUTPUT_DIR"
+fi
+
 
 # Step 6: Install Gunicorn and Gevent (for concurrency)
 echo "📦 Installing Gunicorn and Gevent..."
@@ -54,8 +61,8 @@ poetry add gunicorn gevent
 # Step 7: Run Flask App using Gunicorn
 echo "🚀 Starting Flask app using Gunicorn..."
 nohup poetry run gunicorn --workers=6 --worker-class=gevent --worker-connections=1000 \
-  --max-requests=10000 --max-requests-jitter=1000 --backlog=2048 --bind 127.0.0.1:5000 \
-  --timeout=30 --access-logfile=- --error-logfile=- proxy_manager:create_app() &
+  --max-requests=10000 --max-requests-jitter=1000 --backlog=2048 --bind 127.0.0.1:5001 \
+  --timeout=30 --access-logfile=- --error-logfile=- "src.app:create_app()" &
 
 # Step 8: Configure NGINX for the Flask App
 echo "🔧 Configuring NGINX..."
@@ -68,7 +75,7 @@ server {
     server_name $DOMAIN;
 
     location / {
-        proxy_pass http://127.0.0.1:5000;
+        proxy_pass http://127.0.0.1:5001;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -83,7 +90,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:5000;
+        proxy_pass http://127.0.0.1:5001;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;

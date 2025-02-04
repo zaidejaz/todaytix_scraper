@@ -1,5 +1,6 @@
 # events.py
 from datetime import datetime
+from io import StringIO
 from flask import Blueprint, jsonify, request, render_template, current_app
 from flask_login import login_required
 from werkzeug.utils import secure_filename
@@ -175,3 +176,23 @@ def import_events():
         if 'temp_path' in locals():
             os.remove(temp_path)
         return jsonify({'error': str(e)}), 500
+    
+@bp.route('/api/events/template', methods=['GET'])
+@login_required
+def download_template():
+    # Create a CSV template file with headers
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['event_id', 'event_name', 'city', 'start_date', 'end_date', 'markup'])
+    
+    writer.writerow(['EVT001', 'Sample Event', 'New York', '2024-01-01', '2024-01-03', '1.6'])
+    
+    # Create the response
+    output.seek(0)
+    return current_app.response_class(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={
+            "Content-Disposition": "attachment;filename=event_template.csv"
+        }
+    )
