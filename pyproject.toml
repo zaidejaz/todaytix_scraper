@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "todaytix-scraper"
+name = "events-scraper"
 version = "0.1.0"
 description = ""
 authors = ["zaidejaz <zaidejaz521@gmail.com>"]
