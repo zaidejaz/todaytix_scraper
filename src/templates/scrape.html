@@ -28,7 +28,7 @@
                 <label class="block text-sm font-medium text-gray-700">Scrape Interval (minutes)</label>
                 <div class="mt-1 flex items-center space-x-2">
                     <input type="number" id="intervalMinutes" min="1" value="20"
-                        class="rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
+                        class="rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 p-2"
                         {% if current_job and current_job.status=='running' %}disabled{% endif %}>
                 </div>
             </div>
@@ -261,6 +261,6 @@
         updateFilesList();
     });
 
-    
+
 </script>
 {% endblock %}

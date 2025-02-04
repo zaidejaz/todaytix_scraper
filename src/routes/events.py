@@ -201,3 +201,36 @@ def download_template():
             "Content-Disposition": "attachment;filename=event_template.csv"
         }
     )
+
+@bp.route('/api/events/export', methods=['GET'])
+@login_required
+def export_events():
+    try:
+        events = Event.query.all()
+        
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        writer.writerow(['event_id', 'event_name', 'city', 'start_date', 'end_date', 'markup'])
+        
+        for event in events:
+            city_name = get_city_name_by_id(event.city_id)
+            writer.writerow([
+                event.event_id,
+                event.event_name,
+                city_name,
+                event.start_date.strftime('%Y-%m-%d'),
+                event.end_date.strftime('%Y-%m-%d'),
+                f"{event.markup}"
+            ])
+        
+        output.seek(0)
+        return current_app.response_class(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={
+                "Content-Disposition": f"attachment;filename=events_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            }
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
