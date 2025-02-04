@@ -5,14 +5,14 @@ set -e  # Exit on error
 echo "🔧 Deploying Flask App..."
 
 # Ensure .env exists
-if [ ! -f "/home/$USER/todaytix_scraper/.env" ]; then
+if [ ! -f "/home/$USER/events_scraper/.env" ]; then
     echo "❌ ERROR: .env file is missing. Create it and rerun the script."
     exit 1
 fi
 
 # Load environment variables from .env
 set -a
-source "/home/$USER/todaytix_scraper/.env"
+source "/home/$USER/events_scraper/.env"
 set +a
 
 # Ensure DOMAIN and EMAIL are set in .env
@@ -35,17 +35,17 @@ curl -sSL https://install.python-poetry.org | python3 -
 
 # Step 3: Create Virtual Environment for the Flask App
 echo "🌱 Creating a virtual environment for the app..."
-python3 -m venv /home/$USER/todaytix_scraper/venv
-source /home/$USER/todaytix_scraper/venv/bin/activate
+python3 -m venv /home/$USER/events_scraper/venv
+source /home/$USER/events_scraper/venv/bin/activate
 
 # Step 4: Install Flask app dependencies using Poetry
 echo "📦 Installing Flask app dependencies..."
-cd "/home/$USER/todaytix_scraper"
+cd "/home/$USER/events_scraper"
 poetry install --no-dev --no-interaction --no-ansi
 
 # Step 5: Create necessary data directories if they don't exist
 echo "📂 Creating necessary data directories..."
-OUTPUT_DIR="/home/$USER/todaytix_scraper/data/output"
+OUTPUT_DIR="/home/$USER/events_scraper/data/output"
 if [ ! -d "$OUTPUT_DIR" ]; then
     mkdir -p "$OUTPUT_DIR"
     echo "Created directory: $OUTPUT_DIR"
@@ -68,7 +68,7 @@ nohup poetry run gunicorn --workers=6 --worker-class=gevent --worker-connections
 echo "🔧 Configuring NGINX..."
 sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 
-NGINX_CONF="/etc/nginx/sites-available/todaytix_scraper"
+NGINX_CONF="/etc/nginx/sites-available/events_scraper"
 sudo tee "$NGINX_CONF" > /dev/null <<EOF
 server {
     listen 80;

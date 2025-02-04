@@ -20,6 +20,6 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "."
-          target: "/home/${{ secrets.SSH_USER }}/todaytix_scraper"
+          target: "/home/${{ secrets.SSH_USER }}/events_scraper"
 
 
