@@ -217,15 +217,14 @@ def list_files():
                 "message": "Output directory not found"
             }), 500
             
-        for file_path in output_dir.glob('*'):
-            if file_path.is_file():
-                try:
-                    file_info = get_file_info(str(file_path))
-                    files.append(file_info)
-                    current_app.logger.debug(f"Found file: {file_info['name']}")
-                except Exception as e:
-                    current_app.logger.error(f"Error processing file {file_path}: {str(e)}")
-                    continue
+        # Only look for .xlsx files
+        for file_path in output_dir.glob('*.xlsx'):
+            try:
+                file_info = get_file_info(str(file_path))
+                files.append(file_info)
+            except Exception as e:
+                current_app.logger.error(f"Error processing file {file_path}: {str(e)}")
+                continue
         
         # Sort files by creation time, newest first
         files.sort(key=lambda x: x['created_at'], reverse=True)
@@ -245,6 +244,13 @@ def list_files():
 @login_required
 def download_file(filename):
     try:
+        # Verify file extension
+        if not filename.lower().endswith('.xlsx'):
+            return jsonify({
+                "status": "error",
+                "message": "Only Excel (.xlsx) files can be downloaded"
+            }), 400
+            
         output_dir = get_output_dir()
         safe_filename = secure_filename(filename)
         file_path = os.path.join(output_dir, safe_filename)
@@ -262,7 +268,7 @@ def download_file(filename):
             file_path,
             as_attachment=True,
             download_name=safe_filename,
-            mimetype='application/octet-stream'
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
     except Exception as e:
         current_app.logger.error(f"Error downloading file: {str(e)}")

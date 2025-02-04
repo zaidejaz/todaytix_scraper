@@ -1,7 +1,7 @@
 # events.py
 from datetime import datetime
 from io import StringIO
-from flask import Blueprint, jsonify, request, render_template, current_app
+from flask import Blueprint, jsonify, redirect, request, render_template, current_app, url_for
 from flask_login import login_required
 from werkzeug.utils import secure_filename
 import csv
@@ -21,6 +21,11 @@ def get_city_name_by_id(city_id):
         if cid == city_id:
             return city_name
     return None
+
+@bp.route('/')
+@login_required
+def index():
+    return redirect(url_for('events.events_page'))
 
 @bp.route('/events', methods=['GET'])
 @login_required
