@@ -50,7 +50,7 @@ def search_events():
             show_date = datetime.strptime(showtime.local_date, '%Y-%m-%d').date()
             if start_date <= show_date <= end_date:
                 filtered_showtimes.append({
-                    'event_id': showtime.id,
+                    'todaytix_id': showtime.id,
                     'event_name': event_name,
                     'city': next((name for name, id_ in CITY_URL_MAP.items() if id_ == city_id), 'Unknown'),
                     'date': showtime.local_date,
@@ -66,11 +66,11 @@ def search_events():
         # Generate CSV
         output = StringIO()
         writer = csv.writer(output)
-        writer.writerow(['Event ID', 'Event Name', 'City', 'Date', 'Time'])
+        writer.writerow(['TodayTix ID', 'Event Name', 'City', 'Date', 'Time'])
         
         for show in filtered_showtimes:
             writer.writerow([
-                show['event_id'],
+                show['todaytix_id'],
                 show['event_name'],
                 show['city'],
                 show['date'],
