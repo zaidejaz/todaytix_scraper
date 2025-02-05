@@ -11,13 +11,14 @@
             <div id="statusDisplay" class="space-y-2">
                 <p>Status: <span id="statusText" class="font-medium">{{ current_job.status if current_job else 'Not
                         Running' }}</span></p>
+                <p>Current Interval: <span id="currentIntervalText" class="font-medium">{{ current_job.interval_minutes}} minutes</span></p>
                 <p>Last Run: <span id="lastRunText" class="font-medium">{{ current_job.last_run if current_job else
                         'Never' }}</span></p>
                 <p>Next Run: <span id="nextRunText" class="font-medium">{{ current_job.next_run if current_job else 'Not
                         Scheduled' }}</span></p>
-                <p>Events Processed: <span id="eventsProcessedText" class="font-medium">{{ current_job.events_processed
-                        if current_job else '0' }}</span></p>
-                <p>Total Tickets Found: <span id="ticketsFoundText" class="font-medium">{{
+                <p>Events Processed (Current Run): <span id="eventsProcessedText" class="font-medium">{{
+                        current_job.events_processed if current_job else '0' }}</span></p>
+                <p>Tickets Found (Current Run): <span id="ticketsFoundText" class="font-medium">{{
                         current_job.total_tickets_found if current_job else '0' }}</span></p>
             </div>
         </div>
@@ -36,11 +37,13 @@
 
         <div class="flex items-center justify-between">
             <button id="startButton" onclick="startScraper()"
-                class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">
+                class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600"
+                style="display: '{{ 'none' if current_job and current_job.status in ['running', 'completed'] else 'inline-block' }}'">
                 Start Scraper
             </button>
             <button id="stopButton" onclick="stopScraper()"
-                class="bg-red-500 text-white px-6 py-2 rounded hover:bg-red-600">
+                class="bg-red-500 text-white px-6 py-2 rounded hover:bg-red-600"
+                style="display: '{{ 'inline-block' if current_job and current_job.status in ['running', 'completed'] else 'none' }}'">
                 Stop Scraper
             </button>
         </div>
@@ -83,110 +86,136 @@
         }
 
         try {
+            const startButton = document.getElementById('startButton');
+            const stopButton = document.getElementById('stopButton');
+
+            startButton.disabled = true;
+            startButton.classList.add('opacity-50');
+            startButton.style.display = 'none';
+            stopButton.style.display = 'inline-block';
+
             const response = await fetch('/api/scrape/start', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ interval_minutes: intervalMinutes })
             });
 
-            const data = await response.json();
-
-            if (response.ok) {
-                updateUI({ status: 'running' });
-                startStatusChecks();
-            } else {
-                showError(data.message);
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.message || 'Failed to start scraper');
             }
+
+            startStatusChecks();
+            await checkStatus();
         } catch (error) {
             showError(error.message);
+
+            const startButton = document.getElementById('startButton');
+            const stopButton = document.getElementById('stopButton');
+
+            startButton.disabled = false;
+            startButton.classList.remove('opacity-50');
+            startButton.style.display = 'inline-block';
+            stopButton.style.display = 'none';
         }
     }
 
     async function stopScraper() {
         try {
-            const response = await fetch('/api/scrape/stop', {
-                method: 'POST'
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                updateUI({ status: 'stopped' });
-                stopStatusChecks();
-            } else {
-                showError(data.message);
+            const stopButton = document.getElementById('stopButton');
+            if (stopButton) {
+                stopButton.disabled = true;
+                stopButton.classList.add('opacity-50');
             }
+
+            const response = await fetch('/api/scrape/stop', { method: 'POST' });
+
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.message || 'Failed to stop scraper');
+            }
+
+            stopStatusChecks();
+            await checkStatus(); // Immediate status check
         } catch (error) {
             showError(error.message);
+        } finally {
+            const stopButton = document.getElementById('stopButton');
+            if (stopButton) {
+                stopButton.disabled = false;
+                stopButton.classList.remove('opacity-50');
+            }
         }
     }
 
     async function checkStatus() {
-        try {
-            const response = await fetch('/api/scrape/status');
-            const data = await response.json();
-            updateUI(data);
-        } catch (error) {
-            console.error('Error checking status:', error);
+    try {
+        const response = await fetch('/api/scrape/status');
+        if (!response.ok) throw new Error('Failed to fetch status');
+        const data = await response.json();
+        console.log(data);
+
+        document.getElementById('statusText').textContent = data.status ;
+        document.getElementById('currentIntervalText').textContent = `${data.interval_minutes} minutes`;
+        document.getElementById('eventsProcessedText').textContent = data.events_processed || '0';
+        document.getElementById('ticketsFoundText').textContent = data.total_tickets_found || '0';
+
+        document.getElementById('lastRunText').textContent = data.last_run ? new Date(data.last_run).toLocaleString() : 'Never';
+        document.getElementById('nextRunText').textContent = data.next_run ? new Date(data.next_run).toLocaleString() : 'Not Scheduled';
+
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const intervalInput = document.getElementById('intervalMinutes');
+
+        if (data.status === 'running' || data.status === 'completed') {
+            startButton.style.display = 'none';
+            stopButton.style.display = 'inline-block';
+            intervalInput.disabled = true;
+        } else {
+            startButton.style.display = 'inline-block';
+            stopButton.style.display = 'none';
+            intervalInput.disabled = false;
         }
+
+        if (data.status === 'error') {
+            stopStatusChecks();
+            await updateFilesList();
+        }
+    } catch (error) {
+        console.error('Error checking status:', error);
     }
+}
 
     function startStatusChecks() {
-        statusCheckInterval = setInterval(checkStatus, 5000);  // Check every 5 seconds
+        if (statusCheckInterval) clearInterval(statusCheckInterval);
+        statusCheckInterval = setInterval(checkStatus, 2000);
     }
 
     function stopStatusChecks() {
         if (statusCheckInterval) {
             clearInterval(statusCheckInterval);
+            statusCheckInterval = null;
         }
-    }
-
-    function updateUI(data) {
-        const isRunning = data.status === 'running';
-        const isCompleted = data.status === 'completed';
-        const isStopped = data.status === 'stopped';
-
-        // Update buttons
-        document.getElementById('startButton').style.display = isRunning || isCompleted ? 'none' : 'inline-block';
-        document.getElementById('stopButton').style.display = !isRunning && !isCompleted ? 'none' : 'inline-block';
-        document.getElementById('intervalMinutes').disabled = isRunning;
-
-        // Update status display
-        document.getElementById('statusText').textContent = data.status || 'Not Running';
-        document.getElementById('lastRunText').textContent = data.last_run || 'Never';
-        document.getElementById('nextRunText').textContent = data.next_run || 'Not Scheduled';
-        document.getElementById('eventsProcessedText').textContent = data.events_processed || '0';
-        document.getElementById('ticketsFoundText').textContent = data.total_tickets_found || '0';
     }
 
     function showError(message) {
-        const result = document.getElementById('result');
-        result.innerHTML = `
-            <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4">
+        let errorDiv = document.getElementById('errorMessage');
+        if (!errorDiv) {
+            errorDiv = document.createElement('div');
+            errorDiv.id = 'errorMessage';
+            document.getElementById('statusDisplay').insertAdjacentElement('afterend', errorDiv);
+        }
+
+        errorDiv.innerHTML = `
+            <div class="mt-4 bg-red-100 border-l-4 border-red-500 text-red-700 p-4">
                 Error: ${message}
             </div>
         `;
+
+        setTimeout(() => errorDiv.innerHTML = '', 5000);
     }
 
-    // Initialize status checks if scraper is running
-    document.addEventListener('DOMContentLoaded', function () {
-        const currentStatus = '{{ current_job.status if current_job else "stopped" }}';
-        if (currentStatus === 'running') {
-            startStatusChecks();
-        }
-
-        // Initialize UI with current job data
-        updateUI({
-            status: currentStatus,
-            last_run: '{{ current_job.last_run if current_job else "" }}',
-            next_run: '{{ current_job.next_run if current_job else "" }}',
-            events_processed: '{{ current_job.events_processed if current_job else 0 }}',
-            total_tickets_found: '{{ current_job.total_tickets_found if current_job else 0 }}'
-        });
-    });
-
+    // Files handling functions
     function formatFileSize(bytes) {
         if (bytes === 0) return '0 Bytes';
         const k = 1024;
@@ -202,11 +231,7 @@
     }
 
     async function downloadFile(filename) {
-        try {
-            window.location.href = `/api/files/${encodeURIComponent(filename)}`;
-        } catch (error) {
-            alert('Error downloading file: ' + error.message);
-        }
+        window.location.href = `/api/files/${encodeURIComponent(filename)}`;
     }
 
     async function updateFilesList() {
@@ -216,51 +241,40 @@
 
             if (data.status === 'success') {
                 const tbody = document.querySelector('#filesTable tbody');
-                tbody.innerHTML = '';
-
-                if (data.files.length === 0) {
-                    tbody.innerHTML = `
-                    <tr>
-                        <td colspan="5" class="px-6 py-4 text-center text-gray-500">
-                            No output files available
-                        </td>
-                    </tr>
-                `;
-                    return;
-                }
-
-                data.files.forEach(file => {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                    <td class="px-6 py-4 whitespace-nowrap">${file.name}</td>
-                    <td class="px-6 py-4 whitespace-nowrap">${new Date(file.created_at).toLocaleString()}</td>
-                    <td class="px-6 py-4 whitespace-nowrap">${formatFileSize(file.size)}</td>
-                    <td class="px-6 py-4 whitespace-nowrap">${formatTimeLeft(file.age_hours)}</td>
-                    <td class="px-6 py-4 whitespace-nowrap">
-                        <button onclick="downloadFile('${file.name}')"
-                                class="text-indigo-600 hover:text-indigo-900">
-                            Download
-                        </button>
-                    </td>
-                `;
-                    tbody.appendChild(row);
-                });
+                tbody.innerHTML = data.files.length === 0
+                    ? '<tr><td colspan="5" class="px-6 py-4 text-center text-gray-500">No output files available</td></tr>'
+                    : data.files.map(file => `
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap">${file.name}</td>
+                            <td class="px-6 py-4 whitespace-nowrap">${new Date(file.created_at).toLocaleString()}</td>
+                            <td class="px-6 py-4 whitespace-nowrap">${formatFileSize(file.size)}</td>
+                            <td class="px-6 py-4 whitespace-nowrap">${formatTimeLeft(file.age_hours)}</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <button onclick="downloadFile('${file.name}')" class="text-indigo-600 hover:text-indigo-900">Download</button>
+                            </td>
+                        </tr>
+                    `).join('');
             }
         } catch (error) {
             console.error('Error updating files list:', error);
         }
     }
 
-    // Add this to your existing status update interval
-    setInterval(() => {
-        updateFilesList();
-    }, 60000); // Update every minute
+    // Initialization
+    document.addEventListener('DOMContentLoaded', async function () {
+        const currentStatus = '{{ current_job.status if current_job else "stopped" }}';
 
-    // Initial load
-    document.addEventListener('DOMContentLoaded', () => {
-        updateFilesList();
+        // Start status checks if already running
+        if (currentStatus === 'running') {
+            startStatusChecks();
+        }
+
+        // Initial data load
+        await checkStatus();
+        await updateFilesList();
+
+        // Start periodic file list updates
+        setInterval(updateFilesList, 60000);
     });
-
-
 </script>
 {% endblock %}

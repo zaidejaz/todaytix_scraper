@@ -27,7 +27,6 @@ def start_scrape():
         data = request.json
         interval_minutes = data.get('interval_minutes', 20)
         
-        # Get events from database
         events = Event.query.all()
         if not events:
             return jsonify({
@@ -35,14 +34,8 @@ def start_scrape():
                 "message": "No events found in database"
             }), 400
 
-        # Create output directory if it doesn't exist
         os.makedirs(current_app.config['OUTPUT_FILE_DIR'], exist_ok=True)
 
-        # Initialize API and scraper
-        api = TodayTixAPI()
-        scraper = EventScraper(api, current_app.config['OUTPUT_FILE_DIR'])
-        
-        # Get or create job record
         job = ScraperJob.query.order_by(ScraperJob.id.desc()).first()
         if not job:
             job = ScraperJob(
@@ -57,59 +50,75 @@ def start_scrape():
         else:
             job.status = 'running'
             job.interval_minutes = interval_minutes
-            job.events_processed = 0  # Reset events processed
-            job.total_tickets_found = 0  # Reset total tickets found
+            job.events_processed = 0
+            job.total_tickets_found = 0
             job.next_run = datetime.now()
         
         db.session.commit()
-        
-        # Run scraper
-        success = False
-        output_file = None
-        try:
-            success, output_file = scraper.run(job)
-        except Exception as e:
-            success = False
-            output_file = None
-        
-        # Update job status based on result
-        if success and output_file:
-            job.status = 'completed'
-            job.last_run = datetime.now()
-            job.next_run = job.last_run + timedelta(minutes=interval_minutes)
-            db.session.commit()
-            
-            # Schedule next run
-            scheduler.add_job(
-                func=ScraperScheduler.start_scraper,
-                trigger='date',
-                run_date=job.next_run,
-                args=[job.id, current_app._get_current_object()],
-                id=f'scraper_{job.id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-            )
-            
-            cleanup_job_id = f'cleanup_{job.id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-            scheduler.add_job(
-                func=cleanup_old_files,
-                trigger='date',
-                run_date=datetime.now() + timedelta(hours=24),
-                id=cleanup_job_id
-            )
 
-            return jsonify({
-                "status": "success",
-                "message": f"Scraping completed. Output saved to {output_file}"
-            })
-        else:
-            job.status = 'error'
-            job.next_run = None
-            db.session.commit()
-            
-            return jsonify({
-                "status": "error",
-                "message": "No data was collected during scraping"
-            }), 400
-            
+        job_id = job.id
+        app = current_app._get_current_object() 
+        output_dir = current_app.config['OUTPUT_FILE_DIR']
+
+        def run_scraper(app, job_id, output_dir, interval_minutes):
+            with app.app_context():
+                try:
+                    job = ScraperJob.query.get(job_id)
+                    if not job:
+                        return
+                    
+                    api = TodayTixAPI()
+                    scraper = EventScraper(api, output_dir)
+                    success, output_file = scraper.run(job)
+
+                    if success and output_file:
+                        job.status = 'completed'
+                        job.last_run = datetime.now()
+                        job.next_run = job.last_run + timedelta(minutes=interval_minutes)
+                        
+                        # Schedule next run
+                        scheduler.add_job(
+                            func=ScraperScheduler.start_scraper,
+                            trigger='date',
+                            run_date=job.next_run,
+                            args=[job_id, app],
+                            id=f'scraper_{job_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+                        )
+                        
+                        # Schedule cleanup
+                        cleanup_job_id = f'cleanup_{job_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+                        scheduler.add_job(
+                            func=cleanup_old_files,
+                            trigger='date',
+                            run_date=datetime.now() + timedelta(hours=24),
+                            id=cleanup_job_id
+                        )
+                    else:
+                        job.status = 'error'
+                        job.next_run = None
+                    
+                    db.session.commit()
+                except Exception as e:
+                    app.logger.error(f"Error in scraper thread: {str(e)}")
+                    job = ScraperJob.query.get(job_id)
+                    if job:
+                        job.status = 'error'
+                        job.next_run = None
+                        db.session.commit()
+
+        import threading
+        thread = threading.Thread(
+            target=run_scraper,
+            args=(app, job_id, output_dir, interval_minutes)
+        )
+        thread.daemon = True
+        thread.start()
+
+        return jsonify({
+            "status": "success",
+            "message": "Scraper started successfully"
+        })
+
     except Exception as e:
         if 'job' in locals():
             job.status = 'error'
@@ -159,7 +168,9 @@ def get_status():
                 "last_run": job.last_run.isoformat() if job.last_run else None,
                 "next_run": job.next_run.isoformat() if job.next_run else None,
                 "events_processed": job.events_processed,
-                "total_tickets_found": job.total_tickets_found
+                "total_tickets_found": job.total_tickets_found,
+                "interval_minutes": job.interval_minutes
+                
             })
         else:
             return jsonify({

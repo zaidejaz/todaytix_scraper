@@ -1,5 +1,5 @@
 from flask import Flask
-from src.routes import upload
+from src.routes import todaytix_events, upload
 from .config import Config
 from .models.database import db, Event
 from .routes import events, scraper
@@ -39,6 +39,7 @@ def create_app():
     app.register_blueprint(events.bp)
     app.register_blueprint(scraper.bp)
     app.register_blueprint(upload.bp)
+    app.register_blueprint(todaytix_events.bp)
 
     with app.app_context():
         db.create_all()

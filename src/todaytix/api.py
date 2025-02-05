@@ -111,32 +111,33 @@ class TodayTixAPI:
         for section in data['data']:
             section_name = section['name']
             for block in section['seatBlocks']:
-                adjacent_seats = []
-                current_group = []
+                row = block['row']
                 
-                for seat in block['seats']:
-                    if not seat['isRestrictedView']:
-                        current_group.append({
-                            'name': seat['name'],
-                            'id': seat['id'],
-                            'is_restricted': seat['isRestrictedView']
-                        })
-                    else:
-                        if len(current_group) >= 2:
-                            adjacent_seats.extend(current_group)
-                        current_group = []
+                non_restricted_seats = [
+                    seat for seat in block['seats']
+                    if not seat['isRestrictedView']
+                ]
                 
-                if len(current_group) >= 2:
-                    adjacent_seats.extend(current_group)
-                
-                for i in range(0, len(adjacent_seats) - 1, 2):
-                    seat1 = adjacent_seats[i]
-                    seat2 = adjacent_seats[i + 1]
+                has_adjacent_pair = False
+                for i in range(len(non_restricted_seats) - 1):
+                    current_seat = non_restricted_seats[i]
+                    next_seat = non_restricted_seats[i + 1]
                     
+                    try:
+                        current_num = int(''.join(filter(str.isdigit, current_seat['name'])))
+                        next_num = int(''.join(filter(str.isdigit, next_seat['name'])))
+                        
+                        if next_num == current_num + 1:
+                            has_adjacent_pair = True
+                            break
+                    except (ValueError, TypeError):
+                        continue
+                    
+                if has_adjacent_pair:
                     seats_data.append({
                         'section': section_name,
-                        'row': block['row'],
-                        'seats': f"{seat1['name']},{seat2['name']}",
+                        'row': row,
+                        'seats': "1,2", 
                         'price': block['salePrice']['value'],
                         'face_value': block['faceValue']['value'],
                         'is_restricted_view': False,

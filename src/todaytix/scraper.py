@@ -4,7 +4,7 @@ import logging
 import time
 import os
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 from ..models.database import Event, ScraperJob, db
 from concurrent.futures import ThreadPoolExecutor
 from ..services import UploadService
@@ -18,7 +18,7 @@ class EventScraper:
         self.max_concurrent = int(os.getenv('MAX_CONCURRENT_REQUESTS', '5'))
         self.app = current_app._get_current_object() 
         
-    def generate_inventory_id(self, event_name: str, date: str, time:str, row: str) -> str:
+    def generate_inventory_id(self, event_name: str, date: str, time: str, row: str) -> str:
         """Generate a unique inventory ID."""
         event_code = ''.join([c.upper() for c in event_name if c.isalpha()][:5])
         event_numeric = ''.join(str(ord(c) - 64) for c in event_code)
@@ -31,53 +31,49 @@ class EventScraper:
             row_numeric = ''.join(str(ord(c.upper()) - 64) for c in row)
         return f"{date_numeric}{event_numeric}{row_numeric}{time_numeric}"
 
-    def get_available_dates(self, event: Event) -> List[Dict]:
-        """Get all available dates and times for an event."""
+    def get_show_id(self, event: Event) -> Optional[int]:
+        """Get show ID using event name and city."""
         try:
-            location_id = event.city_id 
-            api_event = self.api.search_event(event.event_name, location_id)
-            if not api_event:
-                logger.error(f"Event '{event.event_name}' not found")
+            api_event = self.api.search_event(event.event_name, event.city_id)
+            if api_event:
+                return api_event['id']
+            return None
+        except Exception as e:
+            logger.error(f"Error getting show ID for event {event.event_name}: {str(e)}")
+            return None
+
+    def process_event(self, event: Event) -> List[Dict]:
+        """Process a single event using its TodayTix ID."""
+        try:
+            if not event.todaytix_id:
+                logger.error(f"No TodayTix ID found for event: {event.event_name}")
                 return []
 
-            event_id = api_event['id']
-            venue_name = api_event['venue']
-            
-            # Get all available showtimes
-            showtimes = self.api.get_showtimes(event_id)
-            return [{
-                'event_id': event_id,
-                'venue_name': venue_name,
-                'showtime': st
-            } for st in showtimes]
-            
-        except Exception as e:
-            logger.error(f"Error getting dates for {event.event_name}: {str(e)}")
-            return []
+            # Get show ID first
+            show_id = self.get_show_id(event)
+            if not show_id:
+                logger.error(f"Could not find show ID for event: {event.event_name}")
+                return []
 
-    def process_showtime(self, event: Event, showtime_data: Dict) -> List[Dict]:
-        """Process a single showtime and return seat data."""
-        try:
-            event_id = showtime_data['event_id']
-            venue_name = showtime_data['venue_name']
-            showtime = showtime_data['showtime']
+            # Use stored todaytix_id as showtime_id
+            showtime_id = int(event.todaytix_id)
             
-            # Get seats for this showtime
-            seats_data = self.api.get_seats(event_id, showtime.id)
+            # Get seats directly using the IDs
+            seats_data = self.api.get_seats(show_id, showtime_id)
             processed_data = []
             
             for seat in seats_data:
-                # Format date for inventory ID
-                date_str = datetime.strptime(showtime.local_date, '%Y-%m-%d').strftime('%m/%d/%Y')
+                # Format date based on event's date
+                date_str = event.event_date.strftime('%m/%d/%Y')
                 
                 # Use event-specific markup
                 unit_list_price = int(round(seat['price'] * event.markup))
                 
                 processed_data.append({
-                    "inventory_id": self.generate_inventory_id(event.event_name, date_str, showtime.local_time, seat['row']),
+                    "inventory_id": self.generate_inventory_id(event.event_name, date_str, event.event_time, seat['row']),
                     "event_name": event.event_name,
-                    "venue_name": venue_name,
-                    "event_date": f"{showtime.local_date}T{showtime.local_time}:00",
+                    "venue_name": seat['section'].split(' - ')[0] if ' - ' in seat['section'] else 'Unknown Venue',
+                    "event_date": f"{event.event_date.strftime('%Y-%m-%d')}T{event.event_time}:00",
                     "event_id": event.event_id,
                     "quantity": 2,
                     "section": seat['section'],
@@ -103,17 +99,17 @@ class EventScraper:
                     "shown_quantity": "",
                     "passthrough": "",
                 })
-                
+            
             return processed_data
             
         except Exception as e:
-            logger.error(f"Error processing showtime: {str(e)}")
+            logger.error(f"Error processing event {event.event_name}: {str(e)}")
             return []
 
-    def process_showtime_with_context(self, event: Event, date_data: Dict) -> List[Dict]:
+    def process_event_with_context(self, event: Event) -> List[Dict]:
         """Wrapper to handle Flask context in threads"""
         with self.app.app_context():
-            return self.process_showtime(event, date_data)
+            return self.process_event(event)
         
     def run(self, job: ScraperJob):
         """Run the scraper with job tracking and concurrent processing."""
@@ -121,50 +117,31 @@ class EventScraper:
             logger.info("Starting scraper run")
             output_file = None
             
-            # Get all events
-            events = Event.query.all()
+            # Get all events with TodayTix IDs
+            events = Event.query.filter(
+                Event.todaytix_id.isnot(None),
+                Event.website == 'TodayTix'
+            ).all()
+
             if not events:
-                logger.warning("No events found")
+                logger.warning("No TodayTix events found")
                 return False, None
                 
             all_seats_data = []
             
+            # Process events sequentially to avoid rate limiting
             for event in events:
-                # Update job status
-                job.events_processed += 1
-                db.session.commit()
-                
-                logger.info(f"Getting available dates for: {event.event_name}")
-                available_dates = self.get_available_dates(event)
-                available_dates.sort(key=lambda x: x['showtime'].local_date)
-                
-                filtered_dates = [
-                    date_data for date_data in available_dates
-                    if event.start_date <= datetime.strptime(date_data['showtime'].local_date, '%Y-%m-%d').date() <= event.end_date
-                ]
-
-                # Process dates concurrently using ThreadPoolExecutor
-                with ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:
-                    # Use the wrapper function that handles Flask context
-                    futures = [
-                        executor.submit(self.process_showtime_with_context, event, date_data)
-                        for date_data in filtered_dates
-                    ]
-                    
-                    # Process results as they complete
-                    for future in futures:
-                        try:
-                            seats_data = future.result()
-                            if seats_data:
-                                all_seats_data.extend(seats_data)
-                                job.total_tickets_found += len(seats_data)
-                                db.session.commit()
-                                logger.info(f"Found {len(seats_data)} seat pairs")
-                        except Exception as e:
-                            logger.error(f"Error processing showtime: {str(e)}")
-                
-                # Add a small delay between events
-                time.sleep(0.5)
+                try:
+                    seats_data = self.process_event_with_context(event)
+                    if seats_data:
+                        all_seats_data.extend(seats_data)
+                        job.total_tickets_found += len(seats_data)
+                        job.events_processed += 1
+                        db.session.commit()
+                        logger.info(f"Found {len(seats_data)} seat pairs for {event.event_name}")
+                    time.sleep(1)  # Add delay between events
+                except Exception as e:
+                    logger.error(f"Error processing event {event.event_name}: {str(e)}")
             
             if all_seats_data:
                 # Generate output filename with timestamp

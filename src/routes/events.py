@@ -52,11 +52,14 @@ def create_event():
             return jsonify({'error': 'Invalid city ID'}), 400
 
         event = Event(
+            website=data['website'],
             event_id=data['event_id'],
             event_name=data['event_name'],
             city_id=city_id,
-            start_date=datetime.strptime(data['start_date'], '%Y-%m-%d').date(),
-            end_date=datetime.strptime(data['end_date'], '%Y-%m-%d').date(),
+            event_date=datetime.strptime(data['event_date'], '%Y-%m-%d').date(),
+            event_time=data['event_time'],
+            todaytix_id=data.get('todaytix_id'),
+            ticketmaster_id=data.get('ticketmaster_id'),
             markup=float(data['markup'])
         )
         db.session.add(event)
@@ -85,11 +88,14 @@ def update_event(id):
         if city_id not in [cid for cid in CITY_URL_MAP.values()]:
             return jsonify({'error': 'Invalid city ID'}), 400
 
+        event.website = data['website']
         event.event_id = data['event_id']
         event.event_name = data['event_name']
         event.city_id = city_id
-        event.start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
-        event.end_date = datetime.strptime(data['end_date'], '%Y-%m-%d').date()
+        event.event_date = datetime.strptime(data['event_date'], '%Y-%m-%d').date()
+        event.event_time = data['event_time']
+        event.todaytix_id = data.get('todaytix_id')
+        event.ticketmaster_id = data.get('ticketmaster_id')
         event.markup = float(data['markup'])
         
         db.session.commit()
@@ -106,6 +112,34 @@ def delete_event(id):
     db.session.delete(event)
     db.session.commit()
     return '', 204
+
+    
+@bp.route('/api/events/template', methods=['GET'])
+@login_required
+def download_template():
+    # Create a CSV template file with headers
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        'website', 'event_id', 'event_name', 'city', 'event_date', 
+        'event_time', 'todaytix_id', 'ticketmaster_id', 'markup'
+    ])
+    
+    # Add sample row
+    writer.writerow([
+        'TodayTix', 'EVT001', 'Sample Event', 'New York', '2024-01-01',
+        '19:30', 'TTX123', '', '1.6'
+    ])
+    
+    # Create the response
+    output.seek(0)
+    return current_app.response_class(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={
+            "Content-Disposition": "attachment;filename=event_template.csv"
+        }
+    )
 
 @bp.route('/api/events/import', methods=['POST'])
 @login_required
@@ -133,7 +167,7 @@ def import_events():
         with open(temp_path, 'r', encoding='utf-8') as csvfile:
             reader = csv.DictReader(csvfile)
             
-            for row_num, row in enumerate(reader, start=2):  # Start from 2 to account for header row
+            for row_num, row in enumerate(reader, start=2):
                 try:
                     # Get city ID from city name
                     city_id = get_city_id_by_name(row['city'])
@@ -143,11 +177,14 @@ def import_events():
                     
                     # Create new event
                     event = Event(
+                        website=row['website'].strip(),
                         event_id=row['event_id'].strip(),
                         event_name=row['event_name'].strip(),
                         city_id=city_id,
-                        start_date=datetime.strptime(row['start_date'].strip(), '%Y-%m-%d').date(),
-                        end_date=datetime.strptime(row['end_date'].strip(), '%Y-%m-%d').date(),
+                        event_date=datetime.strptime(row['event_date'].strip(), '%Y-%m-%d').date(),
+                        event_time=row['event_time'].strip(),
+                        todaytix_id=row.get('todaytix_id', '').strip() or None,
+                        ticketmaster_id=row.get('ticketmaster_id', '').strip() or None,
                         markup=float(row['markup'].strip())
                     )
                     
@@ -181,26 +218,6 @@ def import_events():
         if 'temp_path' in locals():
             os.remove(temp_path)
         return jsonify({'error': str(e)}), 500
-    
-@bp.route('/api/events/template', methods=['GET'])
-@login_required
-def download_template():
-    # Create a CSV template file with headers
-    output = StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['event_id', 'event_name', 'city', 'start_date', 'end_date', 'markup'])
-    
-    writer.writerow(['EVT001', 'Sample Event', 'New York', '2024-01-01', '2024-01-03', '1.6'])
-    
-    # Create the response
-    output.seek(0)
-    return current_app.response_class(
-        output.getvalue(),
-        mimetype='text/csv',
-        headers={
-            "Content-Disposition": "attachment;filename=event_template.csv"
-        }
-    )
 
 @bp.route('/api/events/export', methods=['GET'])
 @login_required
@@ -211,16 +228,24 @@ def export_events():
         output = StringIO()
         writer = csv.writer(output)
         
-        writer.writerow(['event_id', 'event_name', 'city', 'start_date', 'end_date', 'markup'])
+        # Write headers
+        writer.writerow([
+            'website', 'event_id', 'event_name', 'city', 'event_date', 
+            'event_time', 'todaytix_id', 'ticketmaster_id', 'markup'
+        ])
         
+        # Write data
         for event in events:
             city_name = get_city_name_by_id(event.city_id)
             writer.writerow([
+                event.website,
                 event.event_id,
                 event.event_name,
                 city_name,
-                event.start_date.strftime('%Y-%m-%d'),
-                event.end_date.strftime('%Y-%m-%d'),
+                event.event_date.strftime('%Y-%m-%d'),
+                event.event_time,
+                event.todaytix_id or '',
+                event.ticketmaster_id or '',
                 f"{event.markup}"
             ])
         
