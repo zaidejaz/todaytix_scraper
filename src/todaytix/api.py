@@ -98,7 +98,7 @@ class TodayTixAPI:
             'quantity': quantity,
             'groupSelectionBy': 'SAME_PROVIDER'
         }
-        
+
         data = self._make_proxy_request(
             'GET',
             f'/shows/{show_id}/showtimes/{showtime_id}/sections',
@@ -106,38 +106,37 @@ class TodayTixAPI:
         )
         if not data or 'data' not in data:
             return []
-            
+
         seats_data = []
         for section in data['data']:
             section_name = section['name']
             for block in section['seatBlocks']:
                 row = block['row']
-                
+
                 non_restricted_seats = [
                     seat for seat in block['seats']
                     if not seat['isRestrictedView']
                 ]
-                
-                has_adjacent_pair = False
+
+                all_pairs = []
                 for i in range(len(non_restricted_seats) - 1):
                     current_seat = non_restricted_seats[i]
                     next_seat = non_restricted_seats[i + 1]
-                    
+
                     try:
                         current_num = int(''.join(filter(str.isdigit, current_seat['name'])))
                         next_num = int(''.join(filter(str.isdigit, next_seat['name'])))
-                        
+
                         if next_num == current_num + 1:
-                            has_adjacent_pair = True
-                            break
+                            all_pairs.append(f"{current_seat['name']},{next_seat['name']}")
                     except (ValueError, TypeError):
                         continue
                     
-                if has_adjacent_pair:
+                if all_pairs:
                     seats_data.append({
                         'section': section_name,
                         'row': row,
-                        'seats': "1,2", 
+                        'seats': ';'.join(all_pairs), 
                         'price': block['salePrice']['value'],
                         'face_value': block['faceValue']['value'],
                         'is_restricted_view': False,
@@ -147,5 +146,5 @@ class TodayTixAPI:
                             'order': block['feeSummary']['orderFee']['value']
                         }
                     })
-        
+
         return seats_data

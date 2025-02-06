@@ -54,12 +54,13 @@ def create_event():
         event = Event(
             website=data['website'],
             event_id=data['event_id'],
+            todaytix_event_id=data.get('todaytix_event_id'),
             event_name=data['event_name'],
             city_id=city_id,
             event_date=datetime.strptime(data['event_date'], '%Y-%m-%d').date(),
             event_time=data['event_time'],
-            todaytix_id=data.get('todaytix_id'),
-            ticketmaster_id=data.get('ticketmaster_id'),
+            todaytix_show_id=data.get('todaytix_show_id'),
+            venue_name=data.get('venue_name'),
             markup=float(data['markup'])
         )
         db.session.add(event)
@@ -90,12 +91,13 @@ def update_event(id):
 
         event.website = data['website']
         event.event_id = data['event_id']
+        event.todaytix_event_id = data.get('todaytix_event_id')
         event.event_name = data['event_name']
         event.city_id = city_id
         event.event_date = datetime.strptime(data['event_date'], '%Y-%m-%d').date()
         event.event_time = data['event_time']
-        event.todaytix_id = data.get('todaytix_id')
-        event.ticketmaster_id = data.get('ticketmaster_id')
+        event.todaytix_show_id = data.get('todaytix_show_id')
+        event.venue_name = data.get('venue_name')
         event.markup = float(data['markup'])
         
         db.session.commit()
@@ -117,21 +119,20 @@ def delete_event(id):
 @bp.route('/api/events/template', methods=['GET'])
 @login_required
 def download_template():
-    # Create a CSV template file with headers
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        'website', 'event_id', 'event_name', 'city', 'event_date', 
-        'event_time', 'todaytix_id', 'ticketmaster_id', 'markup'
+        'website', 'event_id', 'todaytix_event_id', 'event_name', 'city', 
+        'event_date', 'event_time', 'todaytix_show_id', 'ticketmaster_id',
+        'venue_name', 'markup'
     ])
     
     # Add sample row
     writer.writerow([
-        'TodayTix', 'EVT001', 'Sample Event', 'New York', '2024-01-01',
-        '19:30', 'TTX123', '', '1.6'
+        'TodayTix', 'EVT_001', '123456', 'Sample Event', 'New York', 
+        '2024-01-01', '19:30', '789', '', 'Sample Theater', '1.6'
     ])
     
-    # Create the response
     output.seek(0)
     return current_app.response_class(
         output.getvalue(),
@@ -140,6 +141,48 @@ def download_template():
             "Content-Disposition": "attachment;filename=event_template.csv"
         }
     )
+
+@bp.route('/api/events/export', methods=['GET'])
+@login_required
+def export_events():
+    try:
+        events = Event.query.all()
+        
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        writer.writerow([
+            'website', 'event_id', 'todaytix_event_id', 'event_name', 'city', 
+            'event_date', 'event_time', 'todaytix_show_id', 'ticketmaster_id',
+            'venue_name', 'markup'
+        ])
+        
+        for event in events:
+            city_name = get_city_name_by_id(event.city_id)
+            writer.writerow([
+                event.website,
+                event.event_id,
+                event.todaytix_event_id or '',
+                event.event_name,
+                city_name,
+                event.event_date.strftime('%Y-%m-%d'),
+                event.event_time,
+                event.todaytix_show_id or '',
+                event.ticketmaster_id or '',
+                event.venue_name or '',
+                f"{event.markup}"
+            ])
+        
+        output.seek(0)
+        return current_app.response_class(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={
+                "Content-Disposition": f"attachment;filename=events_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            }
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/events/import', methods=['POST'])
 @login_required
@@ -155,7 +198,6 @@ def import_events():
         return jsonify({'error': 'Only CSV files are allowed'}), 400
     
     try:
-        # Create temporary file to store the uploaded CSV
         filename = secure_filename(file.filename)
         temp_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
@@ -169,22 +211,21 @@ def import_events():
             
             for row_num, row in enumerate(reader, start=2):
                 try:
-                    # Get city ID from city name
                     city_id = get_city_id_by_name(row['city'])
                     if city_id is None:
-                        errors.append(f"Row {row_num}: Invalid city name '{row['city']}'. Valid cities are: {', '.join(CITY_URL_MAP.keys())}")
+                        errors.append(f"Row {row_num}: Invalid city name '{row['city']}'")
                         continue
                     
-                    # Create new event
                     event = Event(
                         website=row['website'].strip(),
                         event_id=row['event_id'].strip(),
+                        todaytix_event_id=row['todaytix_event_id'].strip() or None,
                         event_name=row['event_name'].strip(),
                         city_id=city_id,
                         event_date=datetime.strptime(row['event_date'].strip(), '%Y-%m-%d').date(),
                         event_time=row['event_time'].strip(),
-                        todaytix_id=row.get('todaytix_id', '').strip() or None,
-                        ticketmaster_id=row.get('ticketmaster_id', '').strip() or None,
+                        todaytix_show_id=row['todaytix_show_id'].strip() or None,
+                        venue_name=row['venue_name'].strip() or None,
                         markup=float(row['markup'].strip())
                     )
                     
@@ -198,7 +239,6 @@ def import_events():
             if imported_count > 0:
                 db.session.commit()
         
-        # Clean up temporary file
         os.remove(temp_path)
         
         response = {
@@ -217,45 +257,4 @@ def import_events():
     except Exception as e:
         if 'temp_path' in locals():
             os.remove(temp_path)
-        return jsonify({'error': str(e)}), 500
-
-@bp.route('/api/events/export', methods=['GET'])
-@login_required
-def export_events():
-    try:
-        events = Event.query.all()
-        
-        output = StringIO()
-        writer = csv.writer(output)
-        
-        # Write headers
-        writer.writerow([
-            'website', 'event_id', 'event_name', 'city', 'event_date', 
-            'event_time', 'todaytix_id', 'ticketmaster_id', 'markup'
-        ])
-        
-        # Write data
-        for event in events:
-            city_name = get_city_name_by_id(event.city_id)
-            writer.writerow([
-                event.website,
-                event.event_id,
-                event.event_name,
-                city_name,
-                event.event_date.strftime('%Y-%m-%d'),
-                event.event_time,
-                event.todaytix_id or '',
-                event.ticketmaster_id or '',
-                f"{event.markup}"
-            ])
-        
-        output.seek(0)
-        return current_app.response_class(
-            output.getvalue(),
-            mimetype='text/csv',
-            headers={
-                "Content-Disposition": f"attachment;filename=events_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            }
-        )
-    except Exception as e:
         return jsonify({'error': str(e)}), 500

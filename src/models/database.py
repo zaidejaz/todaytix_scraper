@@ -8,14 +8,15 @@ class Event(db.Model):
     __tablename__ = 'events'
     
     id = db.Column(db.Integer, primary_key=True)
-    website = db.Column(db.String(255), nullable=False)  # New field
-    event_id = db.Column(db.String(255), nullable=False, unique=True)
+    website = db.Column(db.String(255), nullable=False)
+    event_id = db.Column(db.String(255), nullable=False, unique=True)  # Our internal event ID
+    todaytix_event_id = db.Column(db.String(255), nullable=True)      # TodayTix event ID (showtime ID)
+    todaytix_show_id = db.Column(db.String(255), nullable=True)       # TodayTix show ID
     event_name = db.Column(db.String(255), nullable=False)
     city_id = db.Column(db.Integer, nullable=False)
-    todaytix_id = db.Column(db.String(255), nullable=True)  # New field
-    ticketmaster_id = db.Column(db.String(255), nullable=True)  # New field
-    event_date = db.Column(db.Date, nullable=False)  # Changed from start_date
-    event_time = db.Column(db.String(50), nullable=False)  # New field
+    event_date = db.Column(db.Date, nullable=False)
+    event_time = db.Column(db.String(50), nullable=False)
+    venue_name = db.Column(db.String(255), nullable=True)
     markup = db.Column(db.Float, nullable=False, default=1.6)
     created_at = db.Column(db.DateTime, server_default=func.now())
     updated_at = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now())
@@ -32,13 +33,14 @@ class Event(db.Model):
             'id': self.id,
             'website': self.website,
             'event_id': self.event_id,
+            'todaytix_event_id': self.todaytix_event_id,
+            'todaytix_show_id': self.todaytix_show_id,
             'event_name': self.event_name,
             'city_id': self.city_id,
             'city': city_name or 'Unknown',
-            'todaytix_id': self.todaytix_id,
-            'ticketmaster_id': self.ticketmaster_id,
             'event_date': self.event_date.isoformat() if self.event_date else None,
             'event_time': self.event_time,
+            'venue_name': self.venue_name,
             'markup': self.markup,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None

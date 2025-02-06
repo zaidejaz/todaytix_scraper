@@ -31,35 +31,20 @@ class EventScraper:
             row_numeric = ''.join(str(ord(c.upper()) - 64) for c in row)
         return f"{date_numeric}{event_numeric}{row_numeric}{time_numeric}"
 
-    def get_show_id(self, event: Event) -> Optional[int]:
-        """Get show ID using event name and city."""
-        try:
-            api_event = self.api.search_event(event.event_name, event.city_id)
-            if api_event:
-                return api_event['id']
-            return None
-        except Exception as e:
-            logger.error(f"Error getting show ID for event {event.event_name}: {str(e)}")
-            return None
-
     def process_event(self, event: Event) -> List[Dict]:
-        """Process a single event using its TodayTix ID."""
+        """Process a single event using stored IDs."""
         try:
-            if not event.todaytix_id:
-                logger.error(f"No TodayTix ID found for event: {event.event_name}")
+            # Validate required fields
+            if not event.todaytix_event_id or not event.todaytix_show_id:
+                logger.error(f"Missing TodayTix IDs for event: {event.event_name}")
                 return []
 
-            # Get show ID first
-            show_id = self.get_show_id(event)
-            if not show_id:
-                logger.error(f"Could not find show ID for event: {event.event_name}")
-                return []
-
-            # Use stored todaytix_id as showtime_id
-            showtime_id = int(event.todaytix_id)
+            # Get seats using stored IDs directly
+            seats_data = self.api.get_seats(
+                int(event.todaytix_show_id), 
+                int(event.todaytix_event_id)
+            )
             
-            # Get seats directly using the IDs
-            seats_data = self.api.get_seats(show_id, showtime_id)
             processed_data = []
             
             for seat in seats_data:
@@ -72,7 +57,7 @@ class EventScraper:
                 processed_data.append({
                     "inventory_id": self.generate_inventory_id(event.event_name, date_str, event.event_time, seat['row']),
                     "event_name": event.event_name,
-                    "venue_name": seat['section'].split(' - ')[0] if ' - ' in seat['section'] else 'Unknown Venue',
+                    "venue_name": event.venue_name or 'Unknown Venue',  # Use stored venue name
                     "event_date": f"{event.event_date.strftime('%Y-%m-%d')}T{event.event_time}:00",
                     "event_id": event.event_id,
                     "quantity": 2,
@@ -117,14 +102,15 @@ class EventScraper:
             logger.info("Starting scraper run")
             output_file = None
             
-            # Get all events with TodayTix IDs
+            # Get all events with required TodayTix IDs
             events = Event.query.filter(
-                Event.todaytix_id.isnot(None),
+                Event.todaytix_event_id.isnot(None),
+                Event.todaytix_show_id.isnot(None),
                 Event.website == 'TodayTix'
             ).all()
 
             if not events:
-                logger.warning("No TodayTix events found")
+                logger.warning("No TodayTix events found with required IDs")
                 return False, None
                 
             all_seats_data = []
