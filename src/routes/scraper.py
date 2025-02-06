@@ -134,14 +134,27 @@ def start_scrape():
 @login_required
 def stop_scrape():
     try:
+        # Get the current job
         job = ScraperJob.query.filter(ScraperJob.status.in_(['running', 'completed'])).first()
         if job:
+            # Update job status
             job.status = 'stopped'
             job.next_run = None
             db.session.commit()
+            
+            # Remove all scheduled jobs for this job_id
+            jobs = scheduler.get_jobs()
+            for scheduled_job in jobs:
+                if scheduled_job.id.startswith(f'scraper_{job.id}_'):
+                    scheduler.remove_job(scheduled_job.id)
+                    current_app.logger.info(f"Removed scheduled job: {scheduled_job.id}")
+                elif scheduled_job.id.startswith(f'cleanup_{job.id}_'):
+                    scheduler.remove_job(scheduled_job.id)
+                    current_app.logger.info(f"Removed cleanup job: {scheduled_job.id}")
+            
             return jsonify({
                 "status": "success",
-                "message": "Scraper stopped successfully"
+                "message": "Scraper stopped and all scheduled jobs removed"
             })
         else:
             return jsonify({
