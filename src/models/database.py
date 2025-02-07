@@ -29,7 +29,7 @@ class Event(db.Model):
                 city_name = city
                 break
 
-        return {
+        result =  {
             'id': self.id,
             'website': self.website,
             'event_id': self.event_id,
@@ -45,6 +45,9 @@ class Event(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+
+        result['rules'] = [rule.to_dict() for rule in self.rules]
+        return result
 
     @property
     def city_name(self):
@@ -77,6 +80,29 @@ class ScraperJob(db.Model):
             'next_run': self.next_run.isoformat() if self.next_run else None,
             'events_processed': self.events_processed,
             'total_tickets_found': self.total_tickets_found,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+    
+class EventRule(db.Model):
+    __tablename__ = 'event_rules'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey('events.id', ondelete='CASCADE'), nullable=False)
+    rule_type = db.Column(db.String(50), nullable=False)  # 'even', 'odd', or 'consecutive'
+    keyword = db.Column(db.String(100), nullable=False)  # Single keyword for the rule
+    created_at = db.Column(db.DateTime, server_default=func.now())
+    updated_at = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now())
+    
+    # Relationship with Event model
+    event = db.relationship('Event', backref=db.backref('rules', cascade='all, delete-orphan'))
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'event_id': self.event_id,
+            'rule_type': self.rule_type,
+            'keyword': self.keyword,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

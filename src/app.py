@@ -6,6 +6,7 @@ from .routes import events, scraper
 from .constants import CITY_URL_MAP
 from .scraper.scheduler import scheduler
 from .routes.auth import auth_bp, login_manager
+from .routes.rules import rules_bp
 import logging
 
 # Configure logging
@@ -40,6 +41,7 @@ def create_app():
     app.register_blueprint(scraper.bp)
     app.register_blueprint(upload.bp)
     app.register_blueprint(todaytix_events.bp)
+    app.register_blueprint(rules_bp)
 
     with app.app_context():
         db.create_all()

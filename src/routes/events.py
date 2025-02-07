@@ -142,48 +142,6 @@ def download_template():
         }
     )
 
-@bp.route('/api/events/export', methods=['GET'])
-@login_required
-def export_events():
-    try:
-        events = Event.query.all()
-        
-        output = StringIO()
-        writer = csv.writer(output)
-        
-        writer.writerow([
-            'website', 'event_id', 'todaytix_event_id', 'event_name', 'city', 
-            'event_date', 'event_time', 'todaytix_show_id', 'ticketmaster_id',
-            'venue_name', 'markup'
-        ])
-        
-        for event in events:
-            city_name = get_city_name_by_id(event.city_id)
-            writer.writerow([
-                event.website,
-                event.event_id,
-                event.todaytix_event_id or '',
-                event.event_name,
-                city_name,
-                event.event_date.strftime('%Y-%m-%d'),
-                event.event_time,
-                event.todaytix_show_id or '',
-                event.ticketmaster_id or '',
-                event.venue_name or '',
-                f"{event.markup}"
-            ])
-        
-        output.seek(0)
-        return current_app.response_class(
-            output.getvalue(),
-            mimetype='text/csv',
-            headers={
-                "Content-Disposition": f"attachment;filename=events_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            }
-        )
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 @bp.route('/api/events/import', methods=['POST'])
 @login_required
 def import_events():
@@ -204,6 +162,7 @@ def import_events():
         file.save(temp_path)
         
         imported_count = 0
+        skipped_count = 0
         errors = []
         
         with open(temp_path, 'r', encoding='utf-8') as csvfile:
@@ -211,6 +170,12 @@ def import_events():
             
             for row_num, row in enumerate(reader, start=2):
                 try:
+                    # Check if event already exists
+                    existing_event = Event.query.filter_by(event_id=row['event_id'].strip()).first()
+                    if existing_event:
+                        skipped_count += 1
+                        continue
+                        
                     city_id = get_city_id_by_name(row['city'])
                     if city_id is None:
                         errors.append(f"Row {row_num}: Invalid city name '{row['city']}'")
@@ -244,6 +209,7 @@ def import_events():
         response = {
             'success': True,
             'imported_count': imported_count,
+            'skipped_count': skipped_count,
             'errors': errors
         }
         
@@ -257,4 +223,77 @@ def import_events():
     except Exception as e:
         if 'temp_path' in locals():
             os.remove(temp_path)
+        return jsonify({'error': str(e)}), 500
+
+@bp.route('/api/events/export', methods=['GET'])
+@login_required
+def export_events():
+    try:
+        events = Event.query.all()
+        
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Write headers
+        writer.writerow([
+            'website', 'event_id', 'event_name', 'city', 
+            'event_date', 'event_time', 'todaytix_event_id', 
+            'todaytix_show_id', 'venue_name', 'markup'
+        ])
+        
+        # Write data
+        for event in events:
+            city_name = get_city_name_by_id(event.city_id)
+            writer.writerow([
+                event.website,
+                event.event_id,
+                event.event_name,
+                city_name,
+                event.event_date.strftime('%Y-%m-%d'),
+                event.event_time,
+                event.todaytix_event_id or '',
+                event.todaytix_show_id or '',
+                event.venue_name or '',
+                f"{event.markup:.2f}"
+            ])
+        
+        output.seek(0)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'events_export_{timestamp}.csv'
+        
+        return current_app.response_class(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Type": "text/csv; charset=utf-8"
+            }
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+@bp.route('/api/events/bulk-delete', methods=['POST'])
+@login_required
+def bulk_delete_events():
+    try:
+        data = request.json
+        if not data or 'ids' not in data:
+            return jsonify({'error': 'No event IDs provided'}), 400
+            
+        event_ids = data['ids']
+        if not event_ids:
+            return jsonify({'error': 'Empty ID list'}), 400
+            
+        # Query all events at once
+        events = Event.query.filter(Event.id.in_(event_ids)).all()
+        
+        # Delete all events
+        for event in events:
+            db.session.delete(event)
+            
+        db.session.commit()
+        return jsonify({'success': True, 'count': len(events)}), 200
+        
+    except Exception as e:
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500

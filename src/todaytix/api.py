@@ -91,11 +91,60 @@ class TodayTixAPI:
             for show in data['data']
         ]
 
-    def get_seats(self, show_id: int, showtime_id: int, quantity: int = 2) -> List[Dict]:
-        """Get available seats for a specific showtime."""
+    def analyze_seat_pattern(self, seats):
+        """
+        Analyze if seats follow even, odd, or consecutive pattern
+        Returns tuple of (pattern_type, seats_list) where pattern_type is 'even', 'odd', 'consecutive', or None
+        """
+        # Extract seat numbers
+        seat_numbers = []
+        for seat in seats:
+            try:
+                num = int(''.join(filter(str.isdigit, seat['name'])))
+                seat_numbers.append((num, seat))
+            except (ValueError, TypeError):
+                continue
+
+        if not seat_numbers:
+            return None, []
+
+        # Sort by seat number
+        seat_numbers.sort(key=lambda x: x[0])
+
+        # Check patterns
+        numbers = [x[0] for x in seat_numbers]
+
+        # Check even pattern
+        if all(n % 2 == 0 for n in numbers):
+            return 'even', [s[1] for s in seat_numbers]
+
+        # Check odd pattern    
+        if all(n % 2 == 1 for n in numbers):
+            return 'odd', [s[1] for s in seat_numbers]
+
+        # Check consecutive pattern
+        consecutive_pairs = []
+        for i in range(len(numbers)-1):
+            if numbers[i+1] == numbers[i] + 1:
+                consecutive_pairs.append((seat_numbers[i][1], seat_numbers[i+1][1]))
+
+        if consecutive_pairs:
+            return 'consecutive', [s for pair in consecutive_pairs for s in pair]
+
+        return None, []
+
+    def get_seats(self, show_id: int, showtime_id: int, rules: dict = None) -> List[Dict]:
+        """
+        Get available seats for a specific showtime with pattern matching and price optimization.
+
+        Args:
+            show_id: Show ID
+            showtime_id: Showtime ID
+            rules: Dict of rules with keywords for each pattern type {'even': 'keyword', 'odd': 'keyword', 'consecutive': 'keyword'}
+        """
         params = {
             'allowMultipleGaSections': True,
-            'quantity': quantity,
+            'quantity': 2,
             'groupSelectionBy': 'SAME_PROVIDER'
         }
 
@@ -104,47 +153,62 @@ class TodayTixAPI:
             f'/shows/{show_id}/showtimes/{showtime_id}/sections',
             params=params
         )
+
         if not data or 'data' not in data:
             return []
 
+        # Process each section
         seats_data = []
+        processed_sections = set()  # Track processed section+row combinations
+
         for section in data['data']:
-            section_name = section['name']
+            base_section_name = section['name']
+
+            # Process each block
             for block in section['seatBlocks']:
                 row = block['row']
 
+                # Get non-restricted seats
                 non_restricted_seats = [
                     seat for seat in block['seats']
                     if not seat['isRestrictedView']
                 ]
 
-                all_pairs = []
-                for i in range(len(non_restricted_seats) - 1):
-                    current_seat = non_restricted_seats[i]
-                    next_seat = non_restricted_seats[i + 1]
+                # Analyze seat pattern
+                pattern_type, pattern_seats = self.analyze_seat_pattern(non_restricted_seats)
 
-                    try:
-                        current_num = int(''.join(filter(str.isdigit, current_seat['name'])))
-                        next_num = int(''.join(filter(str.isdigit, next_seat['name'])))
+                if pattern_type and pattern_seats and rules and pattern_type in rules:
+                    # Create section name with rule keyword
+                    section_name = f"{base_section_name} {rules[pattern_type]}"
+                    section_key = f"{section_name}_{row}"
 
-                        if next_num == current_num + 1:
-                            all_pairs.append(f"{current_seat['name']},{next_seat['name']}")
-                    except (ValueError, TypeError):
+                    # Skip if we've already processed this section+row combination
+                    if section_key in processed_sections:
                         continue
-                    
-                if all_pairs:
-                    seats_data.append({
-                        'section': section_name,
-                        'row': row,
-                        'seats': ';'.join(all_pairs), 
-                        'price': block['salePrice']['value'],
-                        'face_value': block['faceValue']['value'],
-                        'is_restricted_view': False,
-                        'fees': {
-                            'convenience': block['feeSummary']['convenience']['value'],
-                            'concierge': block['feeSummary']['concierge']['value'],
-                            'order': block['feeSummary']['orderFee']['value']
-                        }
-                    })
+
+                    # Get consecutive pairs
+                    pairs = []
+                    for i in range(0, len(pattern_seats)-1, 2):
+                        pairs.append(f"{pattern_seats[i]['name']},{pattern_seats[i+1]['name']}")
+
+                    if pairs:
+                        # Add to tracking set
+                        processed_sections.add(section_key)
+
+                        # Add the seat data
+                        seats_data.append({
+                            'section': section_name,
+                            'row': row,
+                            'seats': pairs[0],  # Take only first pair
+                            'price': block['salePrice']['value'],
+                            'face_value': block['faceValue']['value'],
+                            'is_restricted_view': False,
+                            'pattern_type': pattern_type,
+                            'fees': {
+                                'convenience': block['feeSummary']['convenience']['value'],
+                                'concierge': block['feeSummary']['concierge']['value'],
+                                'order': block['feeSummary']['orderFee']['value']
+                            }
+                        })
 
         return seats_data

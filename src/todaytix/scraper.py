@@ -1,3 +1,4 @@
+from concurrent import futures
 from flask import current_app
 import pandas as pd
 import logging
@@ -16,7 +17,7 @@ class EventScraper:
         self.api = api
         self.output_dir = output_dir
         self.max_concurrent = int(os.getenv('MAX_CONCURRENT_REQUESTS', '5'))
-        self.app = current_app._get_current_object() 
+        self.app = current_app._get_current_object()
         
     def generate_inventory_id(self, event_name: str, date: str, time: str, row: str) -> str:
         """Generate a unique inventory ID."""
@@ -31,6 +32,70 @@ class EventScraper:
             row_numeric = ''.join(str(ord(c.upper()) - 64) for c in row)
         return f"{date_numeric}{event_numeric}{row_numeric}{time_numeric}"
 
+    def process_seats(self, event: Event, seats_data: List[Dict]) -> List[Dict]:
+        """Process seats data for an event."""
+        processed_data = []
+        date_str = event.event_date.strftime('%m/%d/%Y')
+        
+        for seat in seats_data:
+            unit_list_price = int(round(seat['price'] * event.markup))
+            
+            processed_data.append({
+                "inventory_id": self.generate_inventory_id(event.event_name, date_str, event.event_time, seat['row']),
+                "event_name": event.event_name,
+                "venue_name": event.venue_name or 'Unknown Venue',
+                "event_date": f"{event.event_date.strftime('%Y-%m-%d')}T{event.event_time}:00",
+                "event_id": event.event_id,
+                "quantity": 2,
+                "section": seat['section'],
+                "row": seat['row'],
+                "seats": seat['seats'],
+                "barcodes": "",
+                "internal_notes": "",
+                "public_notes": "",
+                "tags": "",
+                "list_price": unit_list_price,
+                "face_price": 0,
+                "taxed_cost": 0,
+                "cost": seat['price'],
+                "hide_seats": "Y",
+                "in_hand": "N",
+                "in_hand_date": date_str,
+                "instant_transfer": "N",
+                "files_available": "N",
+                "split_type": "NEVERLEAVEONE",
+                "custom_split": "",
+                "stock_type": "ELECTRONIC",
+                "zone": "N",
+                "shown_quantity": "",
+                "passthrough": "",
+            })
+            
+        return processed_data
+
+
+    def process_event_with_context(self, event: Event) -> List[Dict]:
+        """Wrapper to handle Flask context in threads"""
+        with self.app.app_context():
+            return self.process_event(event)
+
+    def process_event_batch(self, events: List[Event]) -> List[Dict]:
+        """Process a batch of events concurrently."""
+        all_seats = []
+        with ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:
+            futures = [executor.submit(self.process_event_with_context, event) 
+                      for event in events]
+            
+            for future in futures:
+                try:
+                    result = future.result()
+                    if result:
+                        all_seats.extend(result)
+                except Exception as e:
+                    logger.error(f"Error in worker thread: {str(e)}")
+                
+        return all_seats
+        
     def process_event(self, event: Event) -> List[Dict]:
         """Process a single event using stored IDs."""
         try:
@@ -39,69 +104,49 @@ class EventScraper:
                 logger.error(f"Missing TodayTix IDs for event: {event.event_name}")
                 return []
 
-            # Get seats using stored IDs directly
+            # Get rules from database
+            try:
+                rules = {}
+                for rule in event.rules:
+                    rules[rule.rule_type] = rule.keyword
+            except Exception as e:
+                logger.error(f"Error fetching rules for event {event.event_name}: {str(e)}")
+                rules = {}
+
+            # If no rules defined, use defaults
+            if not rules:
+                logger.info(f"Using default rules for event: {event.event_name}")
+                rules = {
+                    'even': 'RIGHT',
+                    'consecutive': 'CENTER',
+                    'odd': 'LEFT'
+                }
+
+            # Get seats with pattern matching using database rules
             seats_data = self.api.get_seats(
                 int(event.todaytix_show_id), 
-                int(event.todaytix_event_id)
+                int(event.todaytix_event_id), 
+                rules=rules
             )
-            
-            processed_data = []
-            
-            for seat in seats_data:
-                # Format date based on event's date
-                date_str = event.event_date.strftime('%m/%d/%Y')
-                
-                # Use event-specific markup
-                unit_list_price = int(round(seat['price'] * event.markup))
-                
-                processed_data.append({
-                    "inventory_id": self.generate_inventory_id(event.event_name, date_str, event.event_time, seat['row']),
-                    "event_name": event.event_name,
-                    "venue_name": event.venue_name or 'Unknown Venue',  # Use stored venue name
-                    "event_date": f"{event.event_date.strftime('%Y-%m-%d')}T{event.event_time}:00",
-                    "event_id": event.event_id,
-                    "quantity": 2,
-                    "section": seat['section'],
-                    "row": seat['row'],
-                    "seats": seat['seats'],
-                    "barcodes": "",
-                    "internal_notes": "",
-                    "public_notes": "",
-                    "tags": "",
-                    "list_price": unit_list_price,
-                    "face_price": 0,
-                    "taxed_cost": 0,
-                    "cost": seat['price'],
-                    "hide_seats": "Y",
-                    "in_hand": "N",
-                    "in_hand_date": date_str,
-                    "instant_transfer": "N",
-                    "files_available": "N",
-                    "split_type": "NEVERLEAVEONE",
-                    "custom_split": "",
-                    "stock_type": "ELECTRONIC",
-                    "zone": "N",
-                    "shown_quantity": "",
-                    "passthrough": "",
-                })
-            
-            return processed_data
-            
+
+            if seats_data:
+                logger.info(f"Found {len(seats_data)} seats for event: {event.event_name}")
+            else:
+                logger.warning(f"No seats found for event: {event.event_name}")
+
+            return self.process_seats(event, seats_data)
+
         except Exception as e:
             logger.error(f"Error processing event {event.event_name}: {str(e)}")
             return []
 
-    def process_event_with_context(self, event: Event) -> List[Dict]:
-        """Wrapper to handle Flask context in threads"""
-        with self.app.app_context():
-            return self.process_event(event)
-        
     def run(self, job: ScraperJob):
         """Run the scraper with job tracking and concurrent processing."""
         try:
             logger.info("Starting scraper run")
+            logger.info(f"Using max concurrent requests: {self.max_concurrent}")
             output_file = None
-            
+
             # Get all events with required TodayTix IDs
             events = Event.query.filter(
                 Event.todaytix_event_id.isnot(None),
@@ -112,33 +157,49 @@ class EventScraper:
             if not events:
                 logger.warning("No TodayTix events found with required IDs")
                 return False, None
-                
+
             all_seats_data = []
-            
-            # Process events sequentially to avoid rate limiting
-            for event in events:
-                try:
-                    seats_data = self.process_event_with_context(event)
-                    if seats_data:
-                        all_seats_data.extend(seats_data)
-                        job.total_tickets_found += len(seats_data)
-                        job.events_processed += 1
+            processed_events = 0
+
+            # Process all events concurrently with rate limiting
+            with ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:
+                # Submit all events for processing
+                future_to_event = {
+                    executor.submit(self.process_event_with_context, event): event 
+                    for event in events
+                }
+
+                # Process results as they complete
+                for future in futures.as_completed(future_to_event):
+                    event = future_to_event[future]
+                    try:
+                        seats_data = future.result()
+                        if seats_data:
+                            all_seats_data.extend(seats_data)
+                            job.total_tickets_found += len(seats_data)
+                            logger.info(f"Found {len(seats_data)} seats for event: {event.event_name}")
+
+                        processed_events += 1
+                        job.events_processed = processed_events
                         db.session.commit()
-                        logger.info(f"Found {len(seats_data)} seat pairs for {event.event_name}")
-                    time.sleep(1)  # Add delay between events
-                except Exception as e:
-                    logger.error(f"Error processing event {event.event_name}: {str(e)}")
-            
+
+                        # Log progress
+                        progress = (processed_events / len(events)) * 100
+                        logger.info(f"Progress: {progress:.1f}% ({processed_events}/{len(events)} events)")
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing event {event.event_name}: {str(e)}")
+
             if all_seats_data:
                 # Generate output filename with timestamp
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 output_file = os.path.join(self.output_dir, f'tickets_{timestamp}.xlsx')
-                
+
                 # Save to Excel
                 output_df = pd.DataFrame(all_seats_data)
                 output_df.to_excel(output_file, index=False)
                 logger.info(f"Saved {len(output_df)} rows to {output_file}")
-                
+
                 # Upload the file
                 upload_service = UploadService(
                     current_app.config['STORE_API_BASE_URL'],
@@ -150,12 +211,12 @@ class EventScraper:
                     logger.info(f"File uploaded successfully: {message}")
                 else:   
                     logger.error(f"File upload failed: {message}")
-                
+
                 return True, output_file
             else:
                 logger.warning("No data collected")
                 return False, None
-                
+
         except Exception as e:
             logger.error(f"Error running scraper: {str(e)}")
             return False, None
