@@ -98,11 +98,10 @@ def mappings_list():
         key = (event.event_name, event.city_id, event.venue_name)
         rule_groups[key] = all_rules
 
-    cities = {cid: name for name, cid in CITY_URL_MAP.items()}
     return render_template('mappings.html', 
                          events=events,
                          rule_groups=rule_groups,
-                         cities=cities,
+                         cities=CITY_URL_MAP,
                          rule_types=VALID_RULE_TYPES)
 
 @rules_bp.route('/mappings/new', methods=['GET', 'POST'])
