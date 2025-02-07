@@ -96,7 +96,6 @@ class TodayTixAPI:
         Analyze if seats follow even, odd, or consecutive pattern
         Returns tuple of (pattern_type, seats_list) where pattern_type is 'even', 'odd', 'consecutive', or None
         """
-        # Extract seat numbers
         seat_numbers = []
         for seat in seats:
             try:
@@ -108,21 +107,16 @@ class TodayTixAPI:
         if not seat_numbers:
             return None, []
 
-        # Sort by seat number
         seat_numbers.sort(key=lambda x: x[0])
 
-        # Check patterns
         numbers = [x[0] for x in seat_numbers]
 
-        # Check even pattern
         if all(n % 2 == 0 for n in numbers):
             return 'even', [s[1] for s in seat_numbers]
 
-        # Check odd pattern    
         if all(n % 2 == 1 for n in numbers):
             return 'odd', [s[1] for s in seat_numbers]
 
-        # Check consecutive pattern
         consecutive_pairs = []
         for i in range(len(numbers)-1):
             if numbers[i+1] == numbers[i] + 1:
@@ -157,50 +151,34 @@ class TodayTixAPI:
         if not data or 'data' not in data:
             return []
 
-        # Process each section
         seats_data = []
-        processed_sections = set()  # Track processed section+row combinations
+        section_row_pairs = {}  
 
         for section in data['data']:
             base_section_name = section['name']
 
-            # Process each block
             for block in section['seatBlocks']:
                 row = block['row']
+                price = block['salePrice']['value']
 
-                # Get non-restricted seats
                 non_restricted_seats = [
                     seat for seat in block['seats']
                     if not seat['isRestrictedView']
                 ]
 
-                # Analyze seat pattern
                 pattern_type, pattern_seats = self.analyze_seat_pattern(non_restricted_seats)
 
                 if pattern_type and pattern_seats and rules and pattern_type in rules:
-                    # Create section name with rule keyword
                     section_name = f"{base_section_name} {rules[pattern_type]}"
                     section_key = f"{section_name}_{row}"
 
-                    # Skip if we've already processed this section+row combination
-                    if section_key in processed_sections:
-                        continue
-
-                    # Get consecutive pairs
                     pairs = []
                     for i in range(0, len(pattern_seats)-1, 2):
-                        pairs.append(f"{pattern_seats[i]['name']},{pattern_seats[i+1]['name']}")
-
-                    if pairs:
-                        # Add to tracking set
-                        processed_sections.add(section_key)
-
-                        # Add the seat data
-                        seats_data.append({
+                        pairs.append({
+                            'seats': f"{pattern_seats[i]['name']},{pattern_seats[i+1]['name']}",
                             'section': section_name,
                             'row': row,
-                            'seats': pairs[0],  # Take only first pair
-                            'price': block['salePrice']['value'],
+                            'price': price,
                             'face_value': block['faceValue']['value'],
                             'is_restricted_view': False,
                             'pattern_type': pattern_type,
@@ -210,5 +188,11 @@ class TodayTixAPI:
                                 'order': block['feeSummary']['orderFee']['value']
                             }
                         })
+
+                    if pairs:
+                        if section_key not in section_row_pairs or price < section_row_pairs[section_key]['price']:
+                            section_row_pairs[section_key] = pairs[0]
+
+        seats_data = list(section_row_pairs.values())
 
         return seats_data
