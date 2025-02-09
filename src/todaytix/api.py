@@ -93,7 +93,7 @@ class TodayTixAPI:
 
     def analyze_seat_pattern(self, seats):
         """
-        Analyze if seats follow even, odd, or consecutive pattern
+        If rules are provided, analyze patterns. Otherwise, just create pairs.
         Returns tuple of (pattern_type, seats_list) where pattern_type is 'even', 'odd', 'consecutive', or None
         """
         seat_numbers = []
@@ -103,75 +103,85 @@ class TodayTixAPI:
                 seat_numbers.append((num, seat))
             except (ValueError, TypeError):
                 continue
-
+                
         if not seat_numbers:
             return None, []
-
+            
+        # Sort by seat number
         seat_numbers.sort(key=lambda x: x[0])
-
+    
+        # If no rules, just return pairs of consecutive seats
+        seats_list = [s[1] for s in seat_numbers]
+        
+        # For pattern analysis (when rules exist)
         numbers = [x[0] for x in seat_numbers]
-
+        
         if all(n % 2 == 0 for n in numbers):
-            return 'even', [s[1] for s in seat_numbers]
-
+            return 'even', seats_list
+            
         if all(n % 2 == 1 for n in numbers):
-            return 'odd', [s[1] for s in seat_numbers]
-
+            return 'odd', seats_list
+            
         consecutive_pairs = []
         for i in range(len(numbers)-1):
             if numbers[i+1] == numbers[i] + 1:
                 consecutive_pairs.append((seat_numbers[i][1], seat_numbers[i+1][1]))
-
+                
         if consecutive_pairs:
             return 'consecutive', [s for pair in consecutive_pairs for s in pair]
-
-        return None, []
-
+            
+        # If no pattern found but seats exist, return them for pairing
+        return None, seats_list
+    
     def get_seats(self, show_id: int, showtime_id: int, rules: dict = None) -> List[Dict]:
         """
-        Get available seats for a specific showtime with pattern matching and price optimization.
-
-        Args:
-            show_id: Show ID
-            showtime_id: Showtime ID
-            rules: Dict of rules with keywords for each pattern type {'even': 'keyword', 'odd': 'keyword', 'consecutive': 'keyword'}
+        Get available seats for a specific showtime.
+        When rules exist, apply pattern matching.
+        When no rules, just get pairs of seats.
         """
         params = {
             'allowMultipleGaSections': True,
             'quantity': 2,
             'groupSelectionBy': 'SAME_PROVIDER'
         }
-
+    
         data = self._make_proxy_request(
             'GET',
             f'/shows/{show_id}/showtimes/{showtime_id}/sections',
             params=params
         )
-
+    
         if not data or 'data' not in data:
             return []
-
+    
         seats_data = []
-        section_row_pairs = {}  
-
+        section_row_pairs = {}  # Track cheapest pairs per section+row
+    
         for section in data['data']:
             base_section_name = section['name']
-
+            
             for block in section['seatBlocks']:
                 row = block['row']
                 price = block['salePrice']['value']
-
+                
                 non_restricted_seats = [
                     seat for seat in block['seats']
                     if not seat['isRestrictedView']
                 ]
-
+                
                 pattern_type, pattern_seats = self.analyze_seat_pattern(non_restricted_seats)
-
-                if pattern_type and pattern_seats and rules and pattern_type in rules:
-                    section_name = f"{base_section_name} {rules[pattern_type]}"
+                
+                if pattern_seats:  # We have seats to process
+                    if rules and pattern_type in rules:
+                        # Apply rules if they exist and we found a matching pattern
+                        section_name = f"{base_section_name} {rules[pattern_type]}"
+                    else:
+                        # No rules or no pattern match - use base section name
+                        section_name = base_section_name
+                    
                     section_key = f"{section_name}_{row}"
-
+                    
+                    # Create pairs from the available seats
                     pairs = []
                     for i in range(0, len(pattern_seats)-1, 2):
                         pairs.append({
@@ -188,11 +198,12 @@ class TodayTixAPI:
                                 'order': block['feeSummary']['orderFee']['value']
                             }
                         })
-
+                    
                     if pairs:
+                        # Keep the cheapest pair for this section+row
                         if section_key not in section_row_pairs or price < section_row_pairs[section_key]['price']:
                             section_row_pairs[section_key] = pairs[0]
-
+    
+        # Convert dictionary to list
         seats_data = list(section_row_pairs.values())
-
         return seats_data

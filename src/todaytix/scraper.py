@@ -36,10 +36,13 @@ class EventScraper:
         """Process seats data for an event."""
         processed_data = []
         date_str = event.event_date.strftime('%m/%d/%Y')
-        
+
+        date_parts = date_str.split('/')
+        in_hand_date = f"{date_parts[2]}-{date_parts[0].zfill(2)}-{date_parts[1].zfill(2)}"
+
         for seat in seats_data:
             unit_list_price = int(round(seat['price'] * event.markup))
-            
+
             processed_data.append({
                 "inventory_id": self.generate_inventory_id(event.event_name, date_str, event.event_time, seat['row']),
                 "event_name": event.event_name,
@@ -60,7 +63,7 @@ class EventScraper:
                 "cost": seat['price'],
                 "hide_seats": "Y",
                 "in_hand": "N",
-                "in_hand_date": date_str,
+                "in_hand_date": in_hand_date,
                 "instant_transfer": "N",
                 "files_available": "N",
                 "split_type": "NEVERLEAVEONE",
@@ -70,7 +73,7 @@ class EventScraper:
                 "shown_quantity": "",
                 "passthrough": "",
             })
-            
+
         return processed_data
 
 
@@ -113,16 +116,7 @@ class EventScraper:
                 logger.error(f"Error fetching rules for event {event.event_name}: {str(e)}")
                 rules = {}
 
-            # If no rules defined, use defaults
-            if not rules:
-                logger.info(f"Using default rules for event: {event.event_name}")
-                rules = {
-                    'even': 'RIGHT',
-                    'consecutive': 'CENTER',
-                    'odd': 'LEFT'
-                }
-
-            # Get seats with pattern matching using database rules
+            # Get seats with pattern matching using database rules (or no rules)
             seats_data = self.api.get_seats(
                 int(event.todaytix_show_id), 
                 int(event.todaytix_event_id), 
