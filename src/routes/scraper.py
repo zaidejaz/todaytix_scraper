@@ -242,7 +242,7 @@ def list_files():
             }), 500
             
         # Only look for .xlsx files
-        for file_path in output_dir.glob('*.xlsx'):
+        for file_path in output_dir.glob('*.csv'):
             try:
                 file_info = get_file_info(str(file_path))
                 files.append(file_info)
@@ -269,7 +269,7 @@ def list_files():
 def download_file(filename):
     try:
         # Verify file extension
-        if not filename.lower().endswith('.xlsx'):
+        if not filename.lower().endswith('.csv'):
             return jsonify({
                 "status": "error",
                 "message": "Only Excel (.xlsx) files can be downloaded"

@@ -16,6 +16,19 @@ class UploadService:
             'accept': 'application/json',
             'Content-Type': 'application/json'
         }
+        self.required_headers = [
+            'inventory_id', 'event_name', 'venue_name', 'event_date', 
+            'event_id', 'quantity', 'section', 'row', 'seats', 'barcodes',
+            'internal_notes', 'public_notes', 'tags', 'list_price', 
+            'face_price', 'taxed_cost', 'cost', 'hide_seats', 'in_hand',
+            'in_hand_date', 'instant_transfer', 'files_available', 
+            'split_type', 'custom_split', 'stock_type', 'zone', 
+            'shown_quantity', 'passthrough'
+        ]
+
+    def create_empty_dataframe(self) -> pd.DataFrame:
+        """Create an empty DataFrame with required headers."""
+        return pd.DataFrame(columns=self.required_headers)
 
     def request_upload(self) -> Tuple[bool, Dict]:
         """Request upload credentials from the API."""
@@ -82,39 +95,48 @@ class UploadService:
 
     def upload_to_s3(self, file_path: str, upload_data: Dict) -> Tuple[bool, str]:
         """Upload file to S3 using provided credentials."""
-        csv_path = None
+        processed_path = None
         try:
             if not os.path.exists(file_path):
                 return False, "File does not exist"
 
-            # Check original file encoding
-            success, msg = self.detect_file_encoding(file_path)
-            if success:
-                logger.info(f"Original file: {msg}")
+            # Process file
+            df = None
+            try:
+                if file_path.endswith(('.xlsx', '.xls')):
+                    df = pd.read_excel(file_path)
+                else:
+                    # Try different encodings for CSV
+                    encodings = ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']
+                    for encoding in encodings:
+                        try:
+                            df = pd.read_csv(file_path, encoding=encoding)
+                            break
+                        except UnicodeDecodeError:
+                            continue
+            except pd.errors.EmptyDataError:
+                # If file is empty, create DataFrame with headers
+                df = self.create_empty_dataframe()
+            except Exception as e:
+                return False, f"Error reading file: {str(e)}"
 
-            # Convert Excel to CSV if needed
-            if file_path.endswith(('.xlsx', '.xls')):
-                success, result = self.convert_excel_to_csv(file_path)
-                if not success:
-                    return False, result
-                csv_path = result
-            else:
-                # For CSV files, ensure UTF-8 encoding
-                df = pd.read_csv(file_path)
-                csv_path = f"{os.path.splitext(file_path)[0]}_utf8.csv"
-                df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+            if df is None:
+                df = self.create_empty_dataframe()
 
-            # Verify final file encoding
-            is_utf8, msg = self.verify_utf8_encoding(csv_path)
-            if not is_utf8:
-                return False, msg
-            logger.info(f"Final file encoding verification: {msg}")
+            # Ensure all required columns exist
+            for header in self.required_headers:
+                if header not in df.columns:
+                    df[header] = ""
+
+            # Save as UTF-8 CSV without BOM
+            processed_path = f"{os.path.splitext(file_path)[0]}_processed.csv"
+            df.to_csv(processed_path, index=False, encoding='utf-8')
 
             # Extract fields from upload data
             fields = upload_data['upload']['fields']
             url = upload_data['upload']['url']
 
-            # Create form data in the exact order S3 expects
+            # Create form data
             form = {
                 'key': fields['key'],
                 'Policy': fields['Policy'],
@@ -124,22 +146,18 @@ class UploadService:
                 'X-Amz-Signature': fields['X-Amz-Signature']
             }
 
-            # Read and upload the file
-            with open(csv_path, 'rb') as f:
+            # Upload file
+            with open(processed_path, 'rb') as f:
                 files = {
-                    'file': (fields['key'], f, 'text/csv; charset=utf-8')
+                    'file': (fields['key'], f, 'text/csv')
                 }
-
-                response = requests.post(
-                    url,
-                    data=form,
-                    files=files
-                )
-
-            if response.status_code not in [200, 201, 204]:
-                logger.error(f"S3 upload failed with status {response.status_code}")
-                logger.error(f"Response content: {response.content}")
-                return False, f"Upload failed with status {response.status_code}"
+                
+                response = requests.post(url, data=form, files=files)
+                
+                if response.status_code not in [200, 201, 204]:
+                    logger.error(f"Upload failed: {response.status_code}")
+                    logger.error(f"Response: {response.text}")
+                    return False, f"Upload failed with status {response.status_code}"
 
             return True, "Upload successful"
 
@@ -148,19 +166,18 @@ class UploadService:
             logger.error(error_msg)
             return False, error_msg
         finally:
-            # Clean up temporary CSV file
-            if csv_path and os.path.exists(csv_path):
+            if processed_path and os.path.exists(processed_path):
                 try:
-                    os.remove(csv_path)
+                    os.remove(processed_path)
                 except Exception as e:
-                    logger.error(f"Error removing temporary CSV file: {str(e)}")
+                    logger.error(f"Error removing temporary file: {str(e)}")
 
     def upload_csv(self, file_path: str) -> Tuple[bool, str]:
         """Complete upload process including requesting credentials and uploading."""
-        # First request upload credentials
+        # Request upload credentials
         success, upload_data = self.request_upload()
         if not success:
             return False, upload_data.get("error", "Failed to get upload credentials")
 
-        # Then upload to S3
+        # Upload to S3
         return self.upload_to_s3(file_path, upload_data)

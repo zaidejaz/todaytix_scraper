@@ -1,4 +1,5 @@
 from concurrent import futures
+import zlib
 from flask import current_app
 import pandas as pd
 import logging
@@ -19,32 +20,48 @@ class EventScraper:
         self.max_concurrent = int(os.getenv('MAX_CONCURRENT_REQUESTS', '5'))
         self.app = current_app._get_current_object()
         
-    def generate_inventory_id(self, event_name: str, date: str, time: str, row: str) -> str:
-        """Generate a unique inventory ID."""
-        event_code = ''.join([c.upper() for c in event_name if c.isalpha()][:5])
-        event_numeric = ''.join(str(ord(c) - 64) for c in event_code)
-        date_numeric = date.replace("/", "")
-        time_numeric = time.replace(":", "")
+    def generate_section_hash(self, section_name: str) -> str:
+        """Generate a 3-digit hash from section name."""
+        return str(zlib.crc32(str(section_name).encode()) % 1000).zfill(3)
+    
+    def convert_row_to_number(self, row: str) -> str:
+        """Convert row to 2-digit numeric format."""
+        if str(row).isdigit():
+            return str(row).zfill(2)
+        return str(ord(str(row).upper()[0]) - ord('A') + 1).zfill(2)
+    
+    def get_first_seat(self, seats: str) -> str:
+        """Extract first seat number from seats string."""
+        try:
+            first_seat = str(seats).split(',')[0].strip()
+            return first_seat
+        except:
+            return "00"
 
-        if row.isdigit():
-            row_numeric = row
-        else:
-            row_numeric = ''.join(str(ord(c.upper()) - 64) for c in row)
-        return f"{date_numeric}{event_numeric}{row_numeric}{time_numeric}"
+    def generate_inventory_id(self, event_id: str, section: str, row: str, seats: str) -> str:
+        """Generate a unique inventory ID following the new format."""
+        section_hash = self.generate_section_hash(section)
+        row_num = self.convert_row_to_number(row)
+        first_seat = self.get_first_seat(seats)
+        
+        return f"{event_id}{section_hash}{row_num}{first_seat}"
 
     def process_seats(self, event: Event, seats_data: List[Dict]) -> List[Dict]:
         """Process seats data for an event."""
         processed_data = []
         date_str = event.event_date.strftime('%m/%d/%Y')
-
         date_parts = date_str.split('/')
         in_hand_date = f"{date_parts[2]}-{date_parts[0].zfill(2)}-{date_parts[1].zfill(2)}"
 
         for seat in seats_data:
             unit_list_price = int(round(seat['price'] * event.markup))
-
             processed_data.append({
-                "inventory_id": self.generate_inventory_id(event.event_name, date_str, event.event_time, seat['row']),
+                "inventory_id": self.generate_inventory_id(
+                    str(event.event_id),
+                    seat['section'],
+                    seat['row'],
+                    seat['seats']
+                ),
                 "event_name": event.event_name,
                 "venue_name": event.venue_name or 'Unknown Venue',
                 "event_date": f"{event.event_date.strftime('%Y-%m-%d')}T{event.event_time}:00",
@@ -73,9 +90,7 @@ class EventScraper:
                 "shown_quantity": "",
                 "passthrough": "",
             })
-
         return processed_data
-
 
     def process_event_with_context(self, event: Event) -> List[Dict]:
         """Wrapper to handle Flask context in threads"""
@@ -141,7 +156,6 @@ class EventScraper:
             logger.info(f"Using max concurrent requests: {self.max_concurrent}")
             output_file = None
 
-            # Get all events with required TodayTix IDs
             events = Event.query.filter(
                 Event.todaytix_event_id.isnot(None),
                 Event.todaytix_show_id.isnot(None),
@@ -155,15 +169,13 @@ class EventScraper:
             all_seats_data = []
             processed_events = 0
 
-            # Process all events concurrently with rate limiting
+            # Process events concurrently
             with ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:
-                # Submit all events for processing
                 future_to_event = {
                     executor.submit(self.process_event_with_context, event): event 
                     for event in events
                 }
 
-                # Process results as they complete
                 for future in futures.as_completed(future_to_event):
                     event = future_to_event[future]
                     try:
@@ -177,7 +189,6 @@ class EventScraper:
                         job.events_processed = processed_events
                         db.session.commit()
 
-                        # Log progress
                         progress = (processed_events / len(events)) * 100
                         logger.info(f"Progress: {progress:.1f}% ({processed_events}/{len(events)} events)")
                         
@@ -185,13 +196,13 @@ class EventScraper:
                         logger.error(f"Error processing event {event.event_name}: {str(e)}")
 
             if all_seats_data:
-                # Generate output filename with timestamp
+                # Save directly as CSV instead of Excel
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                output_file = os.path.join(self.output_dir, f'tickets_{timestamp}.xlsx')
+                output_file = os.path.join(self.output_dir, f'tickets_{timestamp}.csv')
 
-                # Save to Excel
+                # Save as CSV without BOM
                 output_df = pd.DataFrame(all_seats_data)
-                output_df.to_excel(output_file, index=False)
+                output_df.to_csv(output_file, index=False, encoding='utf-8')
                 logger.info(f"Saved {len(output_df)} rows to {output_file}")
 
                 # Upload the file
