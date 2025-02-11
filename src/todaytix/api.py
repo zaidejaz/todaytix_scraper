@@ -1,3 +1,5 @@
+import re
+from flask import current_app
 import requests
 import logging
 import os
@@ -55,10 +57,17 @@ class TodayTixAPI:
             return None
 
     def search_event(self, event_name: str, location: int = 2) -> Optional[Dict]:
-        """Search for an event and return its details."""
+        """
+        Search for an event and return its details.
+        Handles punctuation in event names by normalizing strings before comparison.
+        """
+        def normalize_string(s: str) -> str:
+            s = re.sub(r'[^\w\s]', '', s)
+            return ' '.join(s.lower().split())
+    
         params = {
             'fieldset': 'SHOW_SUMMARY',
-            'query': event_name,
+            'query': normalize_string(event_name),
             'location': location,
             'limit': 5,
             'offset': 0,
@@ -68,10 +77,12 @@ class TodayTixAPI:
         data = self._make_proxy_request('GET', '/shows', params=params)
         if not data or 'data' not in data:
             return None
-            
+    
+        
         for event in data['data']:
-            if event['displayName'].lower() == event_name.lower():
+            if event['displayName'] == event_name:
                 return event
+        
         return None
 
     def get_showtimes(self, show_id: int) -> List[ShowTime]:
