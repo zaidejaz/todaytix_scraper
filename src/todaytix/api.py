@@ -93,70 +93,68 @@ class TodayTixAPI:
 
     def analyze_seat_pattern(self, seats):
         """
-        If rules are provided, analyze patterns. Otherwise, just create pairs.
+        If rules are provided, analyze patterns. Otherwise, create sorted pairs.
         Returns tuple of (pattern_type, seats_list) where pattern_type is 'even', 'odd', 'consecutive', or None
         """
         seat_numbers = []
         for seat in seats:
             try:
+                # Extract numeric part of seat name
                 num = int(''.join(filter(str.isdigit, seat['name'])))
                 seat_numbers.append((num, seat))
             except (ValueError, TypeError):
                 continue
-                
+
         if not seat_numbers:
             return None, []
-            
-        # Sort by seat number
+
+        # Sort by seat number for consistency
         seat_numbers.sort(key=lambda x: x[0])
-    
-        # If no rules, just return pairs of consecutive seats
         seats_list = [s[1] for s in seat_numbers]
-        
-        # For pattern analysis (when rules exist)
+
+        # Pattern analysis
         numbers = [x[0] for x in seat_numbers]
         
         if all(n % 2 == 0 for n in numbers):
             return 'even', seats_list
-            
         if all(n % 2 == 1 for n in numbers):
             return 'odd', seats_list
-            
+
+        # Find consecutive pairs
         consecutive_pairs = []
         for i in range(len(numbers)-1):
             if numbers[i+1] == numbers[i] + 1:
                 consecutive_pairs.append((seat_numbers[i][1], seat_numbers[i+1][1]))
-                
+
         if consecutive_pairs:
             return 'consecutive', [s for pair in consecutive_pairs for s in pair]
-            
-        # If no pattern found but seats exist, return them for pairing
+
         return None, seats_list
-    
+
     def get_seats(self, show_id: int, showtime_id: int, rules: dict = None) -> List[Dict]:
         """
         Get available seats for a specific showtime.
         When rules exist, apply pattern matching.
-        When no rules, just get pairs of seats.
+        When no rules, get pairs of seats starting with lowest numbered seats.
         """
         params = {
             'allowMultipleGaSections': True,
             'quantity': 2,
             'groupSelectionBy': 'SAME_PROVIDER'
         }
-    
+        
         data = self._make_proxy_request(
             'GET',
             f'/shows/{show_id}/showtimes/{showtime_id}/sections',
             params=params
         )
-    
+        
         if not data or 'data' not in data:
             return []
-    
-        seats_data = []
-        section_row_pairs = {}  # Track cheapest pairs per section+row
-    
+
+        # Store all possible pairs with their prices for sorting
+        all_pairs = []
+        
         for section in data['data']:
             base_section_name = section['name']
             
@@ -168,42 +166,58 @@ class TodayTixAPI:
                     seat for seat in block['seats']
                     if not seat['isRestrictedView']
                 ]
-                
+
                 pattern_type, pattern_seats = self.analyze_seat_pattern(non_restricted_seats)
                 
-                if pattern_seats:  # We have seats to process
-                    if rules and pattern_type in rules:
-                        # Apply rules if they exist and we found a matching pattern
-                        section_name = f"{base_section_name} {rules[pattern_type]}"
-                    else:
-                        # No rules or no pattern match - use base section name
-                        section_name = base_section_name
-                    
-                    section_key = f"{section_name}_{row}"
-                    
-                    # Create pairs from the available seats
-                    pairs = []
-                    for i in range(0, len(pattern_seats)-1, 2):
-                        pairs.append({
-                            'seats': f"{pattern_seats[i]['name']},{pattern_seats[i+1]['name']}",
-                            'section': section_name,
-                            'row': row,
-                            'price': price,
-                            'face_value': block['faceValue']['value'],
-                            'is_restricted_view': False,
-                            'pattern_type': pattern_type,
-                            'fees': {
-                                'convenience': block['feeSummary']['convenience']['value'],
-                                'concierge': block['feeSummary']['concierge']['value'],
-                                'order': block['feeSummary']['orderFee']['value']
-                            }
-                        })
-                    
-                    if pairs:
-                        # Keep the cheapest pair for this section+row
-                        if section_key not in section_row_pairs or price < section_row_pairs[section_key]['price']:
-                            section_row_pairs[section_key] = pairs[0]
-    
-        # Convert dictionary to list
-        seats_data = list(section_row_pairs.values())
-        return seats_data
+                if not pattern_seats:
+                    continue
+
+                if rules and pattern_type in rules:
+                    section_name = f"{base_section_name} {rules[pattern_type]}"
+                else:
+                    section_name = base_section_name
+
+                # Create pairs while maintaining seat order
+                for i in range(0, len(pattern_seats)-1, 2):
+                    seat1, seat2 = pattern_seats[i], pattern_seats[i+1]
+                    # Extract seat numbers for sorting
+                    try:
+                        seat_num1 = int(''.join(filter(str.isdigit, seat1['name'])))
+                        seat_num2 = int(''.join(filter(str.isdigit, seat2['name'])))
+                    except (ValueError, TypeError):
+                        continue
+
+                    pair_data = {
+                        'seats': f"{seat1['name']},{seat2['name']}",
+                        'section': section_name,
+                        'row': row,
+                        'price': price,
+                        'face_value': block['faceValue']['value'],
+                        'is_restricted_view': False,
+                        'pattern_type': pattern_type,
+                        'fees': {
+                            'convenience': block['feeSummary']['convenience']['value'],
+                            'concierge': block['feeSummary']['concierge']['value'],
+                            'order': block['feeSummary']['orderFee']['value']
+                        },
+                        'sort_key': (
+                            price,                    
+                            ord(row[0]) if row else 0, 
+                            seat_num1                 
+                        )
+                    }
+                    all_pairs.append(pair_data)
+
+        all_pairs.sort(key=lambda x: x['sort_key'])
+        
+        seen_sections = set()
+        final_pairs = []
+        
+        for pair in all_pairs:
+            section_key = f"{pair['section']}_{pair['row']}"
+            if section_key not in seen_sections:
+                seen_sections.add(section_key)
+                del pair['sort_key']
+                final_pairs.append(pair)
+
+        return final_pairs
