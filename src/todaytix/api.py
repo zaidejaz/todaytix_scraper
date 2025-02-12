@@ -142,7 +142,7 @@ class TodayTixAPI:
 
         return None, seats_list
 
-    def get_seats(self, show_id: int, showtime_id: int, rules: dict = None) -> List[Dict]:
+    def get_seats(self, show_id: int, showtime_id: int, rules: dict = None, excluded_seats: dict = None) -> List[Dict]:
         """
         Get available seats for a specific showtime.
         When rules exist, apply pattern matching.
@@ -162,7 +162,7 @@ class TodayTixAPI:
         
         if not data or 'data' not in data:
             return []
-
+    
         # Store all possible pairs with their prices for sorting
         all_pairs = []
         
@@ -177,27 +177,38 @@ class TodayTixAPI:
                     seat for seat in block['seats']
                     if not seat['isRestrictedView']
                 ]
-
+    
+                # First check if these seats are excluded
+                key = f"{base_section_name}_{row}"
+                if excluded_seats and key in excluded_seats:
+                    # Filter out excluded seats before pattern analysis
+                    non_restricted_seats = [
+                        seat for seat in non_restricted_seats
+                        if not any(s.strip() == seat['name'] for s in excluded_seats[key])
+                    ]
+    
+                if not non_restricted_seats:
+                    continue
+                
                 pattern_type, pattern_seats = self.analyze_seat_pattern(non_restricted_seats)
                 
                 if not pattern_seats:
                     continue
-
+                
+                # Apply pattern rules to section name AFTER exclusion check
+                section_name = base_section_name
                 if rules and pattern_type in rules:
                     section_name = f"{base_section_name} {rules[pattern_type]}"
-                else:
-                    section_name = base_section_name
-
+    
                 # Create pairs while maintaining seat order
                 for i in range(0, len(pattern_seats)-1, 2):
                     seat1, seat2 = pattern_seats[i], pattern_seats[i+1]
-                    # Extract seat numbers for sorting
                     try:
                         seat_num1 = int(''.join(filter(str.isdigit, seat1['name'])))
                         seat_num2 = int(''.join(filter(str.isdigit, seat2['name'])))
                     except (ValueError, TypeError):
                         continue
-
+                    
                     pair_data = {
                         'seats': f"{seat1['name']},{seat2['name']}",
                         'section': section_name,
@@ -218,7 +229,7 @@ class TodayTixAPI:
                         )
                     }
                     all_pairs.append(pair_data)
-
+    
         all_pairs.sort(key=lambda x: x['sort_key'])
         
         seen_sections = set()
@@ -230,5 +241,5 @@ class TodayTixAPI:
                 seen_sections.add(section_key)
                 del pair['sort_key']
                 final_pairs.append(pair)
-
+    
         return final_pairs

@@ -113,3 +113,47 @@ class EventRule(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+    
+class VenueMapping(db.Model):
+    __tablename__ = 'venue_mappings'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    event_name = db.Column(db.String(255), nullable=False)
+    venue_name = db.Column(db.String(255), nullable=False)
+    section = db.Column(db.String(255), nullable=False)
+    row = db.Column(db.String(50), nullable=False)
+    seats = db.Column(db.String(255), nullable=False)  # Comma-separated list of seats
+    active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, server_default=func.now())
+    updated_at = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now())
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'event_name': self.event_name,
+            'venue_name': self.venue_name,
+            'section': self.section,
+            'row': self.row,
+            'seats': self.seats.split(','),  # Convert to list
+            'active': self.active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+    @staticmethod
+    def get_excluded_seats(event_name: str, venue_name: str):
+        """Get all excluded seats for a specific event and venue"""
+        mappings = VenueMapping.query.filter_by(
+            event_name=event_name,
+            venue_name=venue_name,
+            active=True
+        ).all()
+        
+        excluded_seats = {}
+        for mapping in mappings:
+            key = f"{mapping.section}_{mapping.row}"
+            if key not in excluded_seats:
+                excluded_seats[key] = set()
+            excluded_seats[key].update(seat.strip() for seat in mapping.seats.split(','))
+        
+        return excluded_seats

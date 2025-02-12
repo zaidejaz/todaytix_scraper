@@ -7,6 +7,7 @@ from .constants import CITY_URL_MAP
 from .scraper.scheduler import scheduler
 from .routes.auth import auth_bp, login_manager
 from .routes.rules import rules_bp
+from . routes.venue_mapping import bp as venue_mapping_bp
 import logging
 
 # Configure logging
@@ -42,6 +43,8 @@ def create_app():
     app.register_blueprint(upload.bp)
     app.register_blueprint(todaytix_events.bp)
     app.register_blueprint(rules_bp)
+    app.register_blueprint(venue_mapping_bp)
+
 
     with app.app_context():
         db.create_all()

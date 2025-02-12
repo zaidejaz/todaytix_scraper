@@ -7,7 +7,7 @@ import time
 import os
 from datetime import datetime
 from typing import List, Dict, Optional
-from ..models.database import Event, ScraperJob, db
+from ..models.database import Event, ScraperJob, VenueMapping, db
 from concurrent.futures import ThreadPoolExecutor
 from ..services import UploadService
 
@@ -126,14 +126,12 @@ class EventScraper:
         """Process a single event using stored IDs."""
         if self.should_stop():
             return []
-            
+
         try:
-            # Validate required fields
             if not event.todaytix_event_id or not event.todaytix_show_id:
                 logger.error(f"Missing TodayTix IDs for event: {event.event_name}")
                 return []
 
-            # Get rules from database
             try:
                 rules = {}
                 for rule in event.rules:
@@ -142,19 +140,20 @@ class EventScraper:
                 logger.error(f"Error fetching rules for event {event.event_name}: {str(e)}")
                 rules = {}
 
-            # Check for stop signal before API call
+            excluded_seats = VenueMapping.get_excluded_seats(event.event_name, event.venue_name)
+
             if self.should_stop():
                 return []
 
-            # Get seats with pattern matching using database rules (or no rules)
             seats_data = self.api.get_seats(
                 int(event.todaytix_show_id), 
                 int(event.todaytix_event_id), 
-                rules=rules
+                rules=rules,
+                excluded_seats=excluded_seats
             )
 
             if seats_data:
-                logger.info(f"Found {len(seats_data)} seats for event: {event.event_name}")
+                logger.info(f"Found {len(seats_data)} valid seats for event: {event.event_name}")
             else:
                 logger.warning(f"No seats found for event: {event.event_name}")
 
