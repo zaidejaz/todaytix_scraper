@@ -34,6 +34,12 @@ def get_mappings():
     mappings = query.order_by(VenueMapping.created_at.desc()).all()
     return jsonify([mapping.to_dict() for mapping in mappings])
 
+@bp.route('/api/venue-mappings/<int:id>', methods=['GET'])
+@login_required
+def get_mapping(id):
+    mapping = VenueMapping.query.get_or_404(id)
+    return jsonify(mapping.to_dict())
+
 @bp.route('/api/venue-mappings', methods=['POST'])
 @login_required
 def create_mapping():
