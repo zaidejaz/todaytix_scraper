@@ -9,15 +9,17 @@ class Event(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     website = db.Column(db.String(255), nullable=False)
-    event_id = db.Column(db.String(255), nullable=False, unique=True)  # Our internal event ID
-    todaytix_event_id = db.Column(db.String(255), nullable=True)      # TodayTix event ID (showtime ID)
-    todaytix_show_id = db.Column(db.String(255), nullable=True)       # TodayTix show ID
+    event_id = db.Column(db.String(255), nullable=False, unique=True)
+    todaytix_event_id = db.Column(db.String(255), nullable=True)
+    todaytix_show_id = db.Column(db.String(255), nullable=True)
     event_name = db.Column(db.String(255), nullable=False)
     city_id = db.Column(db.Integer, nullable=False)
     event_date = db.Column(db.Date, nullable=False)
     event_time = db.Column(db.String(50), nullable=False)
     venue_name = db.Column(db.String(255), nullable=True)
     markup = db.Column(db.Float, nullable=False, default=1.6)
+    stock_type = db.Column(db.String(50), nullable=True) 
+    in_hand_date = db.Column(db.Date, nullable=True)   
     created_at = db.Column(db.DateTime, server_default=func.now())
     updated_at = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -29,7 +31,7 @@ class Event(db.Model):
                 city_name = city
                 break
 
-        result =  {
+        result = {
             'id': self.id,
             'website': self.website,
             'event_id': self.event_id,
@@ -42,6 +44,8 @@ class Event(db.Model):
             'event_time': self.event_time,
             'venue_name': self.venue_name,
             'markup': self.markup,
+            'stock_type': self.stock_type,
+            'in_hand_date': self.in_hand_date.isoformat() if self.in_hand_date else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -64,6 +68,8 @@ class ScraperJob(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     status = db.Column(db.String(50), nullable=False)
     interval_minutes = db.Column(db.Integer, nullable=False)
+    concurrent_requests = db.Column(db.Integer, nullable=False, default=5)
+    auto_upload = db.Column(db.Boolean, nullable=False, default=False)  
     last_run = db.Column(db.DateTime)
     next_run = db.Column(db.DateTime)
     events_processed = db.Column(db.Integer, default=0)
@@ -76,6 +82,8 @@ class ScraperJob(db.Model):
             'id': self.id,
             'status': self.status,
             'interval_minutes': self.interval_minutes,
+            'concurrent_requests': self.concurrent_requests,
+            'auto_upload': self.auto_upload,
             'last_run': self.last_run.isoformat() if self.last_run else None,
             'next_run': self.next_run.isoformat() if self.next_run else None,
             'events_processed': self.events_processed,
@@ -89,12 +97,11 @@ class EventRule(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     event_id = db.Column(db.Integer, db.ForeignKey('events.id', ondelete='CASCADE'), nullable=False)
-    rule_type = db.Column(db.String(50), nullable=False)  # 'even', 'odd', or 'consecutive'
-    keyword = db.Column(db.String(100), nullable=False)  # Single keyword for the rule
+    rule_type = db.Column(db.String(50), nullable=False)
+    keyword = db.Column(db.String(100), nullable=False)  
     created_at = db.Column(db.DateTime, server_default=func.now())
     updated_at = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now())
     
-    # Relationship with Event model
     event = db.relationship('Event', backref=db.backref('rules', cascade='all, delete-orphan'))
     
     def to_dict(self):

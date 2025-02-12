@@ -61,7 +61,9 @@ def create_event():
             event_time=data['event_time'],
             todaytix_show_id=data.get('todaytix_show_id'),
             venue_name=data.get('venue_name'),
-            markup=float(data['markup'])
+            markup=float(data['markup']),
+            stock_type=data.get('stock_type'),
+            in_hand_date=datetime.strptime(data['in_hand_date'], '%Y-%m-%d').date() if data.get('in_hand_date') else None
         )
         db.session.add(event)
         db.session.commit()
@@ -99,6 +101,8 @@ def update_event(id):
         event.todaytix_show_id = data.get('todaytix_show_id')
         event.venue_name = data.get('venue_name')
         event.markup = float(data['markup'])
+        event.stock_type = data.get('stock_type')
+        event.in_hand_date = datetime.strptime(data['in_hand_date'], '%Y-%m-%d').date() if data.get('in_hand_date') else None
         
         db.session.commit()
         return jsonify(event.to_dict())
@@ -123,14 +127,15 @@ def download_template():
     writer = csv.writer(output)
     writer.writerow([
         'website', 'event_id', 'todaytix_event_id', 'event_name', 'city', 
-        'event_date', 'event_time', 'todaytix_show_id', 'ticketmaster_id',
-        'venue_name', 'markup'
+        'event_date', 'event_time', 'todaytix_show_id', 'venue_name', 'markup',
+        'stock_type', 'in_hand_date' 
     ])
     
     # Add sample row
     writer.writerow([
         'TodayTix', 'EVT_001', '123456', 'Sample Event', 'New York', 
-        '2024-01-01', '19:30', '789', '', 'Sample Theater', '1.6'
+        '2024-01-01', '19:30', '789', 'Sample Theater', '1.6',
+        'ELECTRONIC', '2025-02-12' 
     ])
     
     output.seek(0)
@@ -181,6 +186,15 @@ def import_events():
                         errors.append(f"Row {row_num}: Invalid city name '{row['city']}'")
                         continue
                     
+                    # Parse the in_hand_date if provided
+                    in_hand_date = None
+                    if row.get('in_hand_date') and row['in_hand_date'].strip():
+                        try:
+                            in_hand_date = datetime.strptime(row['in_hand_date'].strip(), '%Y-%m-%d').date()
+                        except ValueError:
+                            errors.append(f"Row {row_num}: Invalid in_hand_date format. Use YYYY-MM-DD")
+                            continue
+
                     event = Event(
                         website=row['website'].strip(),
                         event_id=row['event_id'].strip(),
@@ -191,7 +205,9 @@ def import_events():
                         event_time=row['event_time'].strip(),
                         todaytix_show_id=row['todaytix_show_id'].strip() or None,
                         venue_name=row['venue_name'].strip() or None,
-                        markup=float(row['markup'].strip())
+                        markup=float(row['markup'].strip()),
+                        stock_type=row['stock_type'].strip() if row.get('stock_type') else None,
+                        in_hand_date=in_hand_date
                     )
                     
                     db.session.add(event)
@@ -238,7 +254,8 @@ def export_events():
         writer.writerow([
             'website', 'event_id', 'event_name', 'city', 
             'event_date', 'event_time', 'todaytix_event_id', 
-            'todaytix_show_id', 'venue_name', 'markup'
+            'todaytix_show_id', 'venue_name', 'markup',
+            'stock_type', 'in_hand_date'  
         ])
         
         # Write data
@@ -254,7 +271,9 @@ def export_events():
                 event.todaytix_event_id or '',
                 event.todaytix_show_id or '',
                 event.venue_name or '',
-                f"{event.markup:.2f}"
+                f"{event.markup:.2f}",
+                event.stock_type or '',
+                event.in_hand_date.strftime('%Y-%m-%d') if event.in_hand_date else ''
             ])
         
         output.seek(0)

@@ -50,6 +50,10 @@
                         Show ID</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Markup
                     </th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock
+                        Type</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">In Hand
+                        Date</th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions
                     </th>
                 </tr>
@@ -72,6 +76,8 @@
                     <td class="px-6 py-4 whitespace-nowrap">{{ event.todaytix_event_id or '-' }}</td>
                     <td class="px-6 py-4 whitespace-nowrap">{{ event.todaytix_show_id or '-' }}</td>
                     <td class="px-6 py-4 whitespace-nowrap">{{ "%.2f"|format(event.markup) }}x</td>
+                    <td class="px-6 py-4 whitespace-nowrap">{{ event.stock_type or '-' }}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">{{ event.in_hand_date or '-' }}</td>
                     <td class="px-6 py-4 whitespace-nowrap space-x-2">
                         <button onclick="editEvent('{{ event.id }}')"
                             class="text-indigo-600 hover:text-indigo-900">Edit</button>
@@ -170,6 +176,18 @@
                         class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" value="1.6">
                 </div>
 
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Stock Type</label>
+                    <input type="text" id="stockType" name="stock_type"
+                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">In Hand Date</label>
+                    <input type="date" id="inHandDate" name="in_hand_date"
+                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
+                </div>
+
                 <div class="flex justify-end space-x-2">
                     <button type="button" onclick="closeModal()"
                         class="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300">
@@ -213,6 +231,8 @@
             document.getElementById('todaytixShowId').value = event.todaytix_show_id || '';
             document.getElementById('venueName').value = event.venue_name || '';
             document.getElementById('markup').value = event.markup;
+            document.getElementById('stockType').value = event.stock_type || '';
+            document.getElementById('inHandDate').value = event.in_hand_date || '';
             showEventModal(true);
         }
     }
@@ -240,7 +260,9 @@
                 todaytix_event_id: formData.get('todaytix_event_id') || null,
                 todaytix_show_id: formData.get('todaytix_show_id') || null,
                 venue_name: formData.get('venue_name') || null,
-                markup: parseFloat(formData.get('markup'))
+                markup: parseFloat(formData.get('markup')),
+                stock_type: formData.get('stock_type') || null,
+                in_hand_date: formData.get('in_hand_date') || null,
             })
         });
 

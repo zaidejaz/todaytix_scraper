@@ -14,12 +14,28 @@ from ..services import UploadService
 logger = logging.getLogger(__name__)
 
 class EventScraper:
-    def __init__(self, api, output_dir: str):
+    def __init__(self, api, output_dir: str, concurrent_requests: int = 5, auto_upload: bool = False):
         self.api = api
         self.output_dir = output_dir
-        self.max_concurrent = int(os.getenv('MAX_CONCURRENT_REQUESTS', '5'))
+        self.max_concurrent = concurrent_requests
+        self.auto_upload = auto_upload
         self.app = current_app._get_current_object()
+        self._stop_requested = False
+        self._executor = None
         
+    def request_stop(self):
+        """Signal the scraper to stop gracefully"""
+        self._stop_requested = True
+        if self._executor:
+            self._executor.shutdown(wait=False)
+            
+    def should_stop(self) -> bool:
+        """Check if stop has been requested"""
+        with self.app.app_context():
+            # Check both internal flag and job status
+            job = ScraperJob.query.order_by(ScraperJob.id.desc()).first()
+            return self._stop_requested or (job and job.status == 'stopped')
+
     def generate_section_hash(self, section_name: str) -> str:
         """Generate a 3-digit hash from section name."""
         return str(zlib.crc32(str(section_name).encode()) % 1000).zfill(3)
@@ -48,12 +64,18 @@ class EventScraper:
 
     def process_seats(self, event: Event, seats_data: List[Dict]) -> List[Dict]:
         """Process seats data for an event."""
+        if self.should_stop():
+            return []
+            
         processed_data = []
         date_str = event.event_date.strftime('%m/%d/%Y')
         date_parts = date_str.split('/')
         in_hand_date = f"{date_parts[2]}-{date_parts[0].zfill(2)}-{date_parts[1].zfill(2)}"
 
         for seat in seats_data:
+            if self.should_stop():
+                return processed_data
+                
             unit_list_price = int(round(seat['price'] * event.markup))
             processed_data.append({
                 "inventory_id": self.generate_inventory_id(
@@ -80,12 +102,12 @@ class EventScraper:
                 "cost": seat['price'],
                 "hide_seats": "Y",
                 "in_hand": "N",
-                "in_hand_date": in_hand_date,
+                "in_hand_date": event.in_hand_date or in_hand_date,
                 "instant_transfer": "N",
                 "files_available": "N",
                 "split_type": "NEVERLEAVEONE",
                 "custom_split": "",
-                "stock_type": "ELECTRONIC",
+                "stock_type": event.stock_type or "ELECTRONIC",
                 "zone": "N",
                 "shown_quantity": "",
                 "passthrough": "",
@@ -94,28 +116,17 @@ class EventScraper:
 
     def process_event_with_context(self, event: Event) -> List[Dict]:
         """Wrapper to handle Flask context in threads"""
+        if self.should_stop():
+            return []
+            
         with self.app.app_context():
             return self.process_event(event)
 
-    def process_event_batch(self, events: List[Event]) -> List[Dict]:
-        """Process a batch of events concurrently."""
-        all_seats = []
-        with ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:
-            futures = [executor.submit(self.process_event_with_context, event) 
-                      for event in events]
-            
-            for future in futures:
-                try:
-                    result = future.result()
-                    if result:
-                        all_seats.extend(result)
-                except Exception as e:
-                    logger.error(f"Error in worker thread: {str(e)}")
-                
-        return all_seats
-        
     def process_event(self, event: Event) -> List[Dict]:
         """Process a single event using stored IDs."""
+        if self.should_stop():
+            return []
+            
         try:
             # Validate required fields
             if not event.todaytix_event_id or not event.todaytix_show_id:
@@ -130,6 +141,10 @@ class EventScraper:
             except Exception as e:
                 logger.error(f"Error fetching rules for event {event.event_name}: {str(e)}")
                 rules = {}
+
+            # Check for stop signal before API call
+            if self.should_stop():
+                return []
 
             # Get seats with pattern matching using database rules (or no rules)
             seats_data = self.api.get_seats(
@@ -152,8 +167,10 @@ class EventScraper:
     def run(self, job: ScraperJob):
         """Run the scraper with job tracking and concurrent processing."""
         try:
+            self._stop_requested = False
             logger.info("Starting scraper run")
             logger.info(f"Using max concurrent requests: {self.max_concurrent}")
+            logger.info(f"Auto upload enabled: {self.auto_upload}")
             output_file = None
 
             events = Event.query.filter(
@@ -171,12 +188,17 @@ class EventScraper:
 
             # Process events concurrently
             with ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:
+                self._executor = executor  # Store executor for stop requests
                 future_to_event = {
                     executor.submit(self.process_event_with_context, event): event 
                     for event in events
                 }
 
                 for future in futures.as_completed(future_to_event):
+                    if self.should_stop():
+                        logger.info("Stop requested, terminating scraper")
+                        return False, None
+                        
                     event = future_to_event[future]
                     try:
                         seats_data = future.result()
@@ -195,6 +217,10 @@ class EventScraper:
                     except Exception as e:
                         logger.error(f"Error processing event {event.event_name}: {str(e)}")
 
+            if self.should_stop():
+                logger.info("Stop requested, terminating scraper")
+                return False, None
+
             if all_seats_data:
                 # Save directly as CSV instead of Excel
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -205,17 +231,18 @@ class EventScraper:
                 output_df.to_csv(output_file, index=False, encoding='utf-8')
                 logger.info(f"Saved {len(output_df)} rows to {output_file}")
 
-                # Upload the file
-                upload_service = UploadService(
-                    current_app.config['STORE_API_BASE_URL'],
-                    current_app.config['STORE_API_KEY'],
-                    current_app.config['COMPANY_ID']
-                )
-                success, message = upload_service.upload_csv(output_file)
-                if success:
-                    logger.info(f"File uploaded successfully: {message}")
-                else:   
-                    logger.error(f"File upload failed: {message}")
+                # Upload the file if auto_upload is enabled
+                if self.auto_upload:
+                    upload_service = UploadService(
+                        current_app.config['STORE_API_BASE_URL'],
+                        current_app.config['STORE_API_KEY'],
+                        current_app.config['COMPANY_ID']
+                    )
+                    success, message = upload_service.upload_csv(output_file)
+                    if success:
+                        logger.info(f"File uploaded successfully: {message}")
+                    else:   
+                        logger.error(f"File upload failed: {message}")
 
                 return True, output_file
             else:
@@ -225,3 +252,5 @@ class EventScraper:
         except Exception as e:
             logger.error(f"Error running scraper: {str(e)}")
             return False, None
+        finally:
+            self._executor = None

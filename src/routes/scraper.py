@@ -26,6 +26,8 @@ def start_scrape():
     try:
         data = request.json
         interval_minutes = data.get('interval_minutes', 20)
+        concurrent_requests = data.get('concurrent_requests', 5)
+        auto_upload = data.get('auto_upload', False)
         
         events = Event.query.all()
         if not events:
@@ -36,11 +38,16 @@ def start_scrape():
 
         os.makedirs(current_app.config['OUTPUT_FILE_DIR'], exist_ok=True)
 
+        # Stop any existing running jobs first
+        stop_all_running_jobs()
+
         job = ScraperJob.query.order_by(ScraperJob.id.desc()).first()
         if not job:
             job = ScraperJob(
                 status='running',
                 interval_minutes=interval_minutes,
+                concurrent_requests=concurrent_requests,
+                auto_upload=auto_upload,
                 events_processed=0,
                 total_tickets_found=0,
                 last_run=None,
@@ -50,6 +57,8 @@ def start_scrape():
         else:
             job.status = 'running'
             job.interval_minutes = interval_minutes
+            job.concurrent_requests = concurrent_requests
+            job.auto_upload = auto_upload
             job.events_processed = 0
             job.total_tickets_found = 0
             job.next_run = datetime.now()
@@ -64,35 +73,43 @@ def start_scrape():
             with app.app_context():
                 try:
                     job = ScraperJob.query.get(job_id)
-                    if not job:
+                    if not job or job.status != 'running':
                         return
                     
                     api = TodayTixAPI()
-                    scraper = EventScraper(api, output_dir)
+                    scraper = EventScraper(api, output_dir, 
+                                         concurrent_requests=job.concurrent_requests,
+                                         auto_upload=job.auto_upload)
                     success, output_file = scraper.run(job)
+
+                    # Recheck job status after run in case it was stopped
+                    job = ScraperJob.query.get(job_id)
+                    if not job or job.status == 'stopped':
+                        return
 
                     if success and output_file:
                         job.status = 'completed'
                         job.last_run = datetime.now()
                         job.next_run = job.last_run + timedelta(minutes=interval_minutes)
                         
-                        # Schedule next run
-                        scheduler.add_job(
-                            func=ScraperScheduler.start_scraper,
-                            trigger='date',
-                            run_date=job.next_run,
-                            args=[job_id, app],
-                            id=f'scraper_{job_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-                        )
-                        
-                        # Schedule cleanup
-                        cleanup_job_id = f'cleanup_{job_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-                        scheduler.add_job(
-                            func=cleanup_old_files,
-                            trigger='date',
-                            run_date=datetime.now() + timedelta(hours=24),
-                            id=cleanup_job_id
-                        )
+                        # Only schedule next run if job wasn't stopped
+                        if job.status != 'stopped':
+                            scheduler.add_job(
+                                func=ScraperScheduler.start_scraper,
+                                trigger='date',
+                                run_date=job.next_run,
+                                args=[job_id, app],
+                                id=f'scraper_{job_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+                            )
+                            
+                            # Schedule cleanup
+                            cleanup_job_id = f'cleanup_{job_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+                            scheduler.add_job(
+                                func=cleanup_old_files,
+                                trigger='date',
+                                run_date=datetime.now() + timedelta(hours=24),
+                                id=cleanup_job_id
+                            )
                     else:
                         job.status = 'error'
                         job.next_run = None
@@ -130,37 +147,33 @@ def start_scrape():
             "message": str(e)
         }), 500
 
+def stop_all_running_jobs():
+    """Helper function to stop all running jobs and clean up"""
+    # Stop all running scraper jobs
+    running_jobs = ScraperJob.query.filter(ScraperJob.status.in_(['running', 'completed'])).all()
+    for job in running_jobs:
+        job.status = 'stopped'
+        job.next_run = None
+        
+        # Remove all scheduled jobs for this job_id
+        jobs = scheduler.get_jobs()
+        for scheduled_job in jobs:
+            if scheduled_job.id.startswith(f'scraper_{job.id}_'):
+                scheduler.remove_job(scheduled_job.id)
+            elif scheduled_job.id.startswith(f'cleanup_{job.id}_'):
+                scheduler.remove_job(scheduled_job.id)
+    
+    db.session.commit()
+
 @bp.route('/api/scrape/stop', methods=['POST'])
 @login_required
 def stop_scrape():
     try:
-        # Get the current job
-        job = ScraperJob.query.filter(ScraperJob.status.in_(['running', 'completed'])).first()
-        if job:
-            # Update job status
-            job.status = 'stopped'
-            job.next_run = None
-            db.session.commit()
-            
-            # Remove all scheduled jobs for this job_id
-            jobs = scheduler.get_jobs()
-            for scheduled_job in jobs:
-                if scheduled_job.id.startswith(f'scraper_{job.id}_'):
-                    scheduler.remove_job(scheduled_job.id)
-                    current_app.logger.info(f"Removed scheduled job: {scheduled_job.id}")
-                elif scheduled_job.id.startswith(f'cleanup_{job.id}_'):
-                    scheduler.remove_job(scheduled_job.id)
-                    current_app.logger.info(f"Removed cleanup job: {scheduled_job.id}")
-            
-            return jsonify({
-                "status": "success",
-                "message": "Scraper stopped and all scheduled jobs removed"
-            })
-        else:
-            return jsonify({
-                "status": "error",
-                "message": "No running or completed job found"
-            }), 404
+        stop_all_running_jobs()
+        return jsonify({
+            "status": "success",
+            "message": "Scraper stopped and all scheduled jobs removed"
+        })
         
     except Exception as e:
         return jsonify({
@@ -182,8 +195,9 @@ def get_status():
                 "next_run": job.next_run.isoformat() if job.next_run else None,
                 "events_processed": job.events_processed,
                 "total_tickets_found": job.total_tickets_found,
-                "interval_minutes": job.interval_minutes
-                
+                "interval_minutes": job.interval_minutes,
+                "concurrent_requests": job.concurrent_requests,
+                "auto_upload": job.auto_upload
             })
         else:
             return jsonify({
@@ -191,7 +205,9 @@ def get_status():
                 "last_run": None,
                 "next_run": None,
                 "events_processed": 0,
-                "total_tickets_found": 0
+                "total_tickets_found": 0,
+                "concurrent_requests": 5,
+                "auto_upload": False
             })
             
     except Exception as e:
