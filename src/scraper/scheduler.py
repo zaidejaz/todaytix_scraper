@@ -14,14 +14,19 @@ class ScraperScheduler:
         with app.app_context():
             job = ScraperJob.query.get(job_id)
             if not job:
-                logger.info(f"Job {job_id} not found")
+                logger.error(f"Job {job_id} not found")
                 return
-
+            
             try:
                 if job.status == 'stopped':
                     logger.info(f"Job {job_id} is stopped, not running")
                     return
 
+                logger.info(f"Starting scheduled job {job_id} with settings from DB:")
+                logger.info(f"- Auto Upload: {job.auto_upload}")
+                logger.info(f"- Concurrent Requests: {job.concurrent_requests}")
+                logger.info(f"- Interval Minutes: {job.interval_minutes}")
+                
                 job.status = 'running'
                 job.events_processed = 0
                 job.total_tickets_found = 0
@@ -30,38 +35,49 @@ class ScraperScheduler:
                 db.session.commit()
                 
                 logger.info(f"Job {job_id} started. Next run scheduled at {job.next_run}")
-
+                
                 api = TodayTixAPI()
-                scraper = EventScraper(api, app.config['OUTPUT_FILE_DIR'])
+                scraper = EventScraper(
+                    api=api,
+                    output_dir=app.config['OUTPUT_FILE_DIR'],
+                    concurrent_requests=job.concurrent_requests,  
+                    auto_upload=job.auto_upload 
+                )
+
+                logger.info(f"Initialized scraper with settings - auto_upload: {scraper.auto_upload}, concurrent_requests: {scraper.max_concurrent}")
+                
                 success, output_file = scraper.run(job)
+                
+                logger.info(f"Scraper run completed - success: {success}, output_file: {output_file}")
 
                 if success and output_file:
-                    job.status = 'completed'
-                    
-                    job = ScraperJob.query.get(job_id)  
                     if job.status != 'stopped':
+                        next_run = datetime.now() + timedelta(minutes=job.interval_minutes)
                         scheduler.add_job(
                             func=ScraperScheduler.start_scraper,
                             trigger='date',
-                            run_date=job.next_run,
+                            run_date=next_run,
                             args=[job_id, app],
                             id=f'scraper_{job_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
                         )
-                        logger.info(f"Next run for job {job_id} scheduled at {job.next_run}")
-                    else:
-                        logger.info(f"Job {job_id} was stopped during execution, not scheduling next run")
+                        logger.info(f"Next run scheduled for job {job_id} at {next_run}")
+                    
+                    job.status = 'completed'
                 else:
                     job.status = 'error'
                     job.next_run = None
                     logger.error(f"Scraper run failed for job {job_id}")
-
+                
                 db.session.commit()
-
+                
             except Exception as e:
-                logger.error(f"Error in scraper job {job_id}: {str(e)}")
-                job = ScraperJob.query.get(job_id)
-                if job:
-                    job.status = 'error'
-                    job.next_run = None
-                    db.session.commit()
+                logger.error(f"Error in scheduled job {job_id}: {str(e)}")
+                try:
+                    job = ScraperJob.query.get(job_id)
+                    if job:
+                        job.status = 'error'
+                        job.next_run = None
+                        db.session.commit()
+                except Exception as inner_e:
+                    logger.error(f"Error updating job status: {str(inner_e)}")
                 raise e

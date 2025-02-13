@@ -10,6 +10,7 @@ from ..models.database import Event, ScraperJob, db
 from pathlib import Path
 from werkzeug.utils import secure_filename
 from flask import send_file
+from ..services import UploadService  
 
 bp = Blueprint('scraper', __name__)
 
@@ -75,24 +76,53 @@ def start_scrape():
                     job = ScraperJob.query.get(job_id)
                     if not job or job.status != 'running':
                         return
-                    
+
+                    app.logger.info(f"Job {job_id} settings - auto_upload: {job.auto_upload}, concurrent_requests: {job.concurrent_requests}")
+
                     api = TodayTixAPI()
-                    scraper = EventScraper(api, output_dir, 
-                                         concurrent_requests=job.concurrent_requests,
-                                         auto_upload=job.auto_upload)
+                    scraper = EventScraper(
+                        api=api, 
+                        output_dir=output_dir,
+                        concurrent_requests=job.concurrent_requests,
+                        auto_upload=job.auto_upload  
+                    )
+
+                    app.logger.info(f"Scraper settings - auto_upload: {scraper.auto_upload}, max_concurrent: {scraper.max_concurrent}")
+
                     success, output_file = scraper.run(job)
 
-                    # Recheck job status after run in case it was stopped
+                    app.logger.info(f"Scraper run completed - success: {success}, output_file: {output_file}, auto_upload setting: {scraper.auto_upload}")
+
                     job = ScraperJob.query.get(job_id)
                     if not job or job.status == 'stopped':
                         return
 
                     if success and output_file:
+                        app.logger.info(f"Checking auto_upload setting for job {job_id}: {job.auto_upload}")
+
+                        if job.auto_upload:
+                            app.logger.info(f"Starting file upload for job {job_id}")
+                            try:
+                                upload_service = UploadService(
+                                    api_base_url=app.config['STORE_API_BASE_URL'],
+                                    api_key=app.config['STORE_API_KEY'],
+                                    company_id=app.config['COMPANY_ID']
+                                )
+                                upload_success, message = upload_service.upload_csv(output_file)
+
+                                if upload_success:
+                                    app.logger.info(f"Scheduled job {job_id}: File uploaded successfully")
+                                else:
+                                    app.logger.error(f"Scheduled job {job_id}: File upload failed - {message}")
+                            except Exception as e:
+                                app.logger.error(f"Scheduled job {job_id}: Upload error - {str(e)}")
+                        else:
+                            app.logger.info(f"Auto upload disabled for job {job_id}, skipping upload")
+
                         job.status = 'completed'
                         job.last_run = datetime.now()
                         job.next_run = job.last_run + timedelta(minutes=interval_minutes)
-                        
-                        # Only schedule next run if job wasn't stopped
+
                         if job.status != 'stopped':
                             scheduler.add_job(
                                 func=ScraperScheduler.start_scraper,
@@ -101,8 +131,7 @@ def start_scrape():
                                 args=[job_id, app],
                                 id=f'scraper_{job_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
                             )
-                            
-                            # Schedule cleanup
+
                             cleanup_job_id = f'cleanup_{job_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
                             scheduler.add_job(
                                 func=cleanup_old_files,
@@ -113,7 +142,7 @@ def start_scrape():
                     else:
                         job.status = 'error'
                         job.next_run = None
-                    
+
                     db.session.commit()
                 except Exception as e:
                     app.logger.error(f"Error in scraper thread: {str(e)}")
