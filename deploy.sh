@@ -4,6 +4,26 @@ set -e  # Exit on error
 
 echo "🔧 Deploying Flask App..."
 
+stop_existing_process() {
+    echo "🔍 Checking for existing process on port 5001..."
+    local pid=$(lsof -ti:5001)
+    if [ ! -z "$pid" ]; then
+        echo "🛑 Found process running on port 5001 (PID: $pid). Stopping it..."
+        kill -15 $pid || kill -9 $pid
+        sleep 2
+        
+        # Double check if process is really stopped
+        if lsof -ti:5001 > /dev/null; then
+            echo "❌ Failed to stop process on port 5001"
+            exit 1
+        else
+            echo "✅ Successfully stopped existing process"
+        fi
+    else
+        echo "✅ No existing process found on port 5001"
+    fi
+}
+
 # Ensure .env exists
 if [ ! -f "/home/$USER/events_scraper/.env" ]; then
     echo "❌ ERROR: .env file is missing. Create it and rerun the script."
