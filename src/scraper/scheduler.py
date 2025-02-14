@@ -1,5 +1,7 @@
 from flask_apscheduler import APScheduler
 from datetime import datetime, timedelta
+
+from src.ticketmaster.api import TicketmasterAPI
 from ..models.database import db, ScraperJob
 from ..todaytix.api import TodayTixAPI
 from .scraper import EventScraper
@@ -36,9 +38,11 @@ class ScraperScheduler:
                 
                 logger.info(f"Job {job_id} started. Next run scheduled at {job.next_run}")
                 
-                api = TodayTixAPI()
+                todaytix_api = TodayTixAPI()
+                ticketmaster_api = TicketmasterAPI()
                 scraper = EventScraper(
-                    api=api,
+                    todaytix_api=todaytix_api, 
+                    ticketmaster_api=ticketmaster_api,
                     output_dir=app.config['OUTPUT_FILE_DIR'],
                     concurrent_requests=job.concurrent_requests,  
                     auto_upload=job.auto_upload 

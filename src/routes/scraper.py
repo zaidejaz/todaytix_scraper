@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from flask_login import login_required
 from src.scraper.scheduler import scheduler, ScraperScheduler
+from src.ticketmaster.api import TicketmasterAPI
 from ..todaytix.api import TodayTixAPI
 from ..scraper.scraper import EventScraper
 from ..models.database import Event, ScraperJob, db
@@ -79,9 +80,11 @@ def start_scrape():
 
                     app.logger.info(f"Job {job_id} settings - auto_upload: {job.auto_upload}, concurrent_requests: {job.concurrent_requests}")
 
-                    api = TodayTixAPI()
+                    todaytix_api = TodayTixAPI()
+                    ticketmaster_api = TicketmasterAPI()
                     scraper = EventScraper(
-                        api=api, 
+                        todaytix_api=todaytix_api, 
+                        ticketmaster_api=ticketmaster_api,
                         output_dir=output_dir,
                         concurrent_requests=job.concurrent_requests,
                         auto_upload=job.auto_upload  

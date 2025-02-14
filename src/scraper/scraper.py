@@ -14,8 +14,9 @@ from ..services import UploadService
 logger = logging.getLogger(__name__)
 
 class EventScraper:
-    def __init__(self, api, output_dir: str, concurrent_requests: int = 5, auto_upload: bool = False):
-        self.api = api
+    def __init__(self, todaytix_api, ticketmaster_api, output_dir: str, concurrent_requests: int = 5, auto_upload: bool = False):
+        self.todaytix_api = todaytix_api
+        self.ticketmaster_api = ticketmaster_api
         self.output_dir = output_dir
         self.max_concurrent = concurrent_requests
         self.auto_upload = auto_upload
@@ -123,34 +124,39 @@ class EventScraper:
             return self.process_event(event)
 
     def process_event(self, event: Event) -> List[Dict]:
-        """Process a single event using stored IDs."""
+        """Process a single event."""
         if self.should_stop():
             return []
 
         try:
-            if not event.todaytix_event_id or not event.todaytix_show_id:
-                logger.error(f"Missing TodayTix IDs for event: {event.event_name}")
-                return []
+            # Different handling based on website type
+            if event.website == 'TodayTix':
+                if not event.todaytix_event_id or not event.todaytix_show_id:
+                    logger.error(f"Missing TodayTix IDs for event: {event.event_name}")
+                    return []
 
-            try:
-                rules = {}
-                for rule in event.rules:
-                    rules[rule.rule_type] = rule.keyword
-            except Exception as e:
-                logger.error(f"Error fetching rules for event {event.event_name}: {str(e)}")
-                rules = {}
+                try:
+                    rules = {}
+                    for rule in event.rules:
+                        rules[rule.rule_type] = rule.keyword
+                except Exception as e:
+                    logger.error(f"Error fetching rules for event {event.event_name}: {str(e)}")
+                    rules = {}
+                
+                excluded_seats = VenueMapping.get_excluded_seats(event.event_name, event.venue_name)
 
-            excluded_seats = VenueMapping.get_excluded_seats(event.event_name, event.venue_name)
+                seats_data = self.todaytix_api.get_seats(
+                    int(event.todaytix_show_id), 
+                    int(event.todaytix_event_id), 
+                    rules=rules,
+                    excluded_seats=excluded_seats
+                )
+            else:  # TicketMaster
+                if not event.ticketmaster_id:
+                    logger.error(f"Missing Ticketmaster ID for event: {event.event_name}")
+                    return []
 
-            if self.should_stop():
-                return []
-
-            seats_data = self.api.get_seats(
-                int(event.todaytix_show_id), 
-                int(event.todaytix_event_id), 
-                rules=rules,
-                excluded_seats=excluded_seats
-            )
+                seats_data = self.ticketmaster_api.get_seats(event.ticketmaster_id)
 
             if seats_data:
                 logger.info(f"Found {len(seats_data)} valid seats for event: {event.event_name}")
@@ -172,14 +178,21 @@ class EventScraper:
             logger.info(f"Auto upload enabled: {self.auto_upload}")
             output_file = None
 
-            events = Event.query.filter(
+            todaytix_events = Event.query.filter(
                 Event.todaytix_event_id.isnot(None),
                 Event.todaytix_show_id.isnot(None),
                 Event.website == 'TodayTix'
             ).all()
 
-            if not events:
-                logger.warning("No TodayTix events found with required IDs")
+            ticketmaster_events = Event.query.filter(
+                Event.ticketmaster_id.isnot(None),
+                Event.website == 'TicketMaster'
+            ).all()
+
+            all_events = todaytix_events + ticketmaster_events
+
+            if not all_events:
+                logger.warning("No events found with required IDs")
                 return False, None
 
             all_seats_data = []
@@ -187,17 +200,17 @@ class EventScraper:
 
             # Process events concurrently
             with ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:
-                self._executor = executor  # Store executor for stop requests
+                self._executor = executor
                 future_to_event = {
                     executor.submit(self.process_event_with_context, event): event 
-                    for event in events
+                    for event in all_events
                 }
 
                 for future in futures.as_completed(future_to_event):
                     if self.should_stop():
                         logger.info("Stop requested, terminating scraper")
                         return False, None
-                        
+
                     event = future_to_event[future]
                     try:
                         seats_data = future.result()
@@ -210,9 +223,9 @@ class EventScraper:
                         job.events_processed = processed_events
                         db.session.commit()
 
-                        progress = (processed_events / len(events)) * 100
-                        logger.info(f"Progress: {progress:.1f}% ({processed_events}/{len(events)} events)")
-                        
+                        progress = (processed_events / len(all_events)) * 100
+                        logger.info(f"Progress: {progress:.1f}% ({processed_events}/{len(all_events)} events)")
+
                     except Exception as e:
                         logger.error(f"Error processing event {event.event_name}: {str(e)}")
 

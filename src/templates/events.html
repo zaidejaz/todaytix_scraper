@@ -61,6 +61,9 @@
                         TodayTix Show ID
                     </th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Ticketmaster ID
+                    </th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Markup
                     </th>
                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -94,6 +97,7 @@
                     <td class="px-6 py-4 whitespace-nowrap">{{ event.event_time }}</td>
                     <td class="px-6 py-4 whitespace-nowrap">{{ event.todaytix_event_id or '-' }}</td>
                     <td class="px-6 py-4 whitespace-nowrap">{{ event.todaytix_show_id or '-' }}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">{{ event.ticketmaster_id or '-' }}</td>
                     <td class="px-6 py-4 whitespace-nowrap">{{ "%.2f"|format(event.markup) }}x</td>
                     <td class="px-6 py-4 whitespace-nowrap">{{ event.stock_type or '-' }}</td>
                     <td class="px-6 py-4 whitespace-nowrap">{{ event.in_hand or 'N' }}</td>
@@ -130,7 +134,7 @@
 
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Website</label>
-                    <select id="website" name="website" required
+                    <select id="website" name="website" required onchange="toggleWebsiteFields()"
                         class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
                         <option value="TodayTix">TodayTix</option>
                         <option value="TicketMaster">TicketMaster</option>
@@ -172,16 +176,28 @@
                         class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
                 </div>
 
-                <div>
-                    <label class="block text-sm font-medium text-gray-700">TodayTix Event ID</label>
-                    <input type="text" id="todaytixEventId" name="todaytix_event_id"
-                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
+                <!-- TodayTix specific fields -->
+                <div id="todaytixFields" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">TodayTix Event ID</label>
+                        <input type="text" id="todaytixEventId" name="todaytix_event_id"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">TodayTix Show ID</label>
+                        <input type="text" id="todaytixShowId" name="todaytix_show_id"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
+                    </div>
                 </div>
 
-                <div>
-                    <label class="block text-sm font-medium text-gray-700">TodayTix Show ID</label>
-                    <input type="text" id="todaytixShowId" name="todaytix_show_id"
-                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
+                <!-- Ticketmaster specific fields -->
+                <div id="ticketmasterFields" class="space-y-4 hidden">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Ticketmaster ID</label>
+                        <input type="text" id="ticketmasterId" name="ticketmaster_id"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
+                    </div>
                 </div>
 
                 <div>
@@ -199,13 +215,12 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Stock Type</label>
                     <input type="text" id="stockType" name="stock_type"
-                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2"
-                        placeholder="ELECTRONIC">
+                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2" placeholder="ELECTRONIC">
                 </div>
 
                 <div>
                     <label class="block text-sm font-medium text-gray-700">In Hand</label>
-                    <select id="inHand" name="in_hand" 
+                    <select id="inHand" name="in_hand"
                         class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2">
                         <option value="N">No</option>
                         <option value="Y">Yes</option>
@@ -233,11 +248,38 @@
 </div>
 
 <script>
+
+    function toggleWebsiteFields() {
+        const website = document.getElementById('website').value;
+        const todaytixFields = document.getElementById('todaytixFields');
+        const ticketmasterFields = document.getElementById('ticketmasterFields');
+
+        console.log('Toggling fields for website:', website); // Add logging
+
+        if (website === 'TodayTix') {
+            todaytixFields.classList.remove('hidden');
+            ticketmasterFields.classList.add('hidden');
+            // Clear Ticketmaster field
+            const ticketmasterId = document.getElementById('ticketmasterId');
+            if (ticketmasterId) ticketmasterId.value = '';
+        } else if (website === 'TicketMaster') {
+            todaytixFields.classList.add('hidden');
+            ticketmasterFields.classList.remove('hidden');
+            // Clear TodayTix fields
+            const todaytixEventId = document.getElementById('todaytixEventId');
+            const todaytixShowId = document.getElementById('todaytixShowId');
+            if (todaytixEventId) todaytixEventId.value = '';
+            if (todaytixShowId) todaytixShowId.value = '';
+        }
+    }
+
+
     function showEventModal(isEdit = false) {
         document.getElementById('modalTitle').textContent = isEdit ? 'Edit Event' : 'Add Event';
         if (!isEdit) {
             document.getElementById('eventId').value = '';
             document.getElementById('eventForm').reset();
+            toggleWebsiteFields();
         }
         document.getElementById('eventModal').classList.remove('hidden');
     }
@@ -257,13 +299,25 @@
             document.getElementById('city').value = event.city_id;
             document.getElementById('eventDate').value = event.event_date;
             document.getElementById('eventTime').value = event.event_time;
-            document.getElementById('todaytixEventId').value = event.todaytix_event_id || '';
-            document.getElementById('todaytixShowId').value = event.todaytix_show_id || '';
             document.getElementById('venueName').value = event.venue_name || '';
             document.getElementById('markup').value = event.markup;
             document.getElementById('stockType').value = event.stock_type || '';
             document.getElementById('inHand').value = event.in_hand || 'N';
             document.getElementById('inHandDate').value = event.in_hand_date || '';
+
+            // Handle website-specific fields
+            if (event.website === 'TodayTix') {
+                document.getElementById('todaytixEventId').value = event.todaytix_event_id || '';
+                document.getElementById('todaytixShowId').value = event.todaytix_show_id || '';
+                document.getElementById('ticketmasterId').value = '';
+            } else {
+                document.getElementById('ticketmasterId').value = event.ticketmaster_id || '';
+                document.getElementById('todaytixEventId').value = '';
+                document.getElementById('todaytixShowId').value = '';
+            }
+
+            // Toggle fields visibility
+            toggleWebsiteFields();
             showEventModal(true);
         }
     }
@@ -273,29 +327,42 @@
 
         const formData = new FormData(e.target);
         const id = formData.get('id');
+        const website = formData.get('website');
         const method = id ? 'PUT' : 'POST';
         const url = id ? `/api/events/${id}` : '/api/events';
+
+        // Build the request body based on website type
+        const requestData = {
+            website: website,
+            event_id: formData.get('event_id'),
+            event_name: formData.get('event_name'),
+            city_id: parseInt(formData.get('city_id')),
+            event_date: formData.get('event_date'),
+            event_time: formData.get('event_time'),
+            venue_name: formData.get('venue_name') || null,
+            markup: parseFloat(formData.get('markup')),
+            stock_type: formData.get('stock_type') || null,
+            in_hand: formData.get('in_hand') || 'N',
+            in_hand_date: formData.get('in_hand_date') || null
+        };
+
+        // Add website-specific fields
+        if (website === 'TodayTix') {
+            requestData.todaytix_event_id = formData.get('todaytix_event_id') || null;
+            requestData.todaytix_show_id = formData.get('todaytix_show_id') || null;
+            requestData.ticketmaster_id = null;
+        } else {
+            requestData.ticketmaster_id = formData.get('ticketmaster_id') || null;
+            requestData.todaytix_event_id = null;
+            requestData.todaytix_show_id = null;
+        }
 
         const response = await fetch(url, {
             method,
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                website: formData.get('website'),
-                event_id: formData.get('event_id'),
-                event_name: formData.get('event_name'),
-                city_id: parseInt(formData.get('city_id')),
-                event_date: formData.get('event_date'),
-                event_time: formData.get('event_time'),
-                todaytix_event_id: formData.get('todaytix_event_id') || null,
-                todaytix_show_id: formData.get('todaytix_show_id') || null,
-                venue_name: formData.get('venue_name') || null,
-                markup: parseFloat(formData.get('markup')),
-                stock_type: formData.get('stock_type') || null,
-                in_hand: formData.get('in_hand') || 'N',
-                in_hand_date: formData.get('in_hand_date') || null
-            })
+            body: JSON.stringify(requestData)
         });
 
         if (response.ok) {
@@ -305,6 +372,16 @@
             alert('Error saving event: ' + (error.error || 'Unknown error'));
         }
     });
+
+    function showEventModal(isEdit = false) {
+        document.getElementById('modalTitle').textContent = isEdit ? 'Edit Event' : 'Add Event';
+        if (!isEdit) {
+            document.getElementById('eventId').value = '';
+            document.getElementById('eventForm').reset();
+            toggleWebsiteFields();
+        }
+        document.getElementById('eventModal').classList.remove('hidden');
+    }
 
     async function deleteEvent(id) {
         if (confirm('Are you sure you want to delete this event?')) {
@@ -440,5 +517,9 @@
             }
         }
     }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        toggleWebsiteFields();
+    });
 </script>
 {% endblock %}

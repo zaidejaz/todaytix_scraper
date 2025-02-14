@@ -20,7 +20,7 @@ class TicketmasterAPI:
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
-            'TMPS-Correlation-Id': str(uuid.uuid4()),  # Generate unique correlation ID
+            'TMPS-Correlation-Id': str(uuid.uuid4()), 
             'Origin': 'https://www.ticketmaster.com',
             'Connection': 'keep-alive',
             'Referer': 'https://www.ticketmaster.com/',
@@ -105,7 +105,7 @@ class TicketmasterAPI:
                 processed_seats.append({
                     'section': pick['section'],
                     'row': 'GA',
-                    'seats': ','.join(map(str, range(20, 24))),  # Generate 20,21,22,23
+                    'seats': ','.join(map(str, range(20, 24))),  
                     'price': price,
                     'face_value': face_value,
                     'type': 'standard'

@@ -59,15 +59,16 @@ def create_event():
             website=data['website'],
             event_id=data['event_id'],
             todaytix_event_id=data.get('todaytix_event_id'),
+            todaytix_show_id=data.get('todaytix_show_id'),
+            ticketmaster_id=data.get('ticketmaster_id'),
             event_name=data['event_name'],
             city_id=city_id,
             event_date=datetime.strptime(data['event_date'], '%Y-%m-%d').date(),
             event_time=data['event_time'],
-            todaytix_show_id=data.get('todaytix_show_id'),
             venue_name=data.get('venue_name'),
             markup=float(data['markup']),
             stock_type=data.get('stock_type'),
-            in_hand=in_hand, 
+            in_hand=in_hand,
             in_hand_date=datetime.strptime(data['in_hand_date'], '%Y-%m-%d').date() if data.get('in_hand_date') else None
         )
         db.session.add(event)
@@ -110,15 +111,16 @@ def update_event(id):
         event.website = data['website']
         event.event_id = data['event_id']
         event.todaytix_event_id = data.get('todaytix_event_id')
+        event.todaytix_show_id = data.get('todaytix_show_id')
+        event.ticketmaster_id = data.get('ticketmaster_id')
         event.event_name = data['event_name']
         event.city_id = city_id
         event.event_date = datetime.strptime(data['event_date'], '%Y-%m-%d').date()
         event.event_time = data['event_time']
-        event.todaytix_show_id = data.get('todaytix_show_id')
         event.venue_name = data.get('venue_name')
         event.markup = float(data['markup'])
         event.stock_type = data.get('stock_type')
-        event.in_hand = in_hand 
+        event.in_hand = in_hand
         event.in_hand_date = datetime.strptime(data['in_hand_date'], '%Y-%m-%d').date() if data.get('in_hand_date') else None
         
         db.session.commit()
@@ -143,14 +145,23 @@ def download_template():
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        'website', 'event_id', 'todaytix_event_id', 'event_name', 'city', 
-        'event_date', 'event_time', 'todaytix_show_id', 'venue_name', 'markup',
+        'website', 'event_id', 'event_name', 'city', 
+        'event_date', 'event_time', 'todaytix_event_id', 
+        'todaytix_show_id', 'ticketmaster_id', 'venue_name', 'markup',
         'stock_type', 'in_hand', 'in_hand_date' 
     ])
     
+    # Add sample row
     writer.writerow([
-        'TodayTix', 'EVT_001', '123456', 'Sample Event', 'New York', 
-        '2024-01-01', '19:30', '789', 'Sample Theater', '1.6',
+        'TodayTix', 'EVT_001', 'Sample Event', 'New York', 
+        '2024-01-01', '19:30', '123456', '789', '', 'Sample Theater', '1.6',
+        'ELECTRONIC', 'N', '2025-02-12'
+    ])
+    
+    # Add Ticketmaster sample row
+    writer.writerow([
+        'TicketMaster', 'EVT_002', 'Sample Event 2', 'New York', 
+        '2024-01-01', '19:30', '', '', 'TM123456', 'Sample Theater', '1.6',
         'ELECTRONIC', 'N', '2025-02-12'
     ])
     
@@ -202,7 +213,7 @@ def import_events():
                         errors.append(f"Row {row_num}: Invalid city name '{row['city']}'")
                         continue
                     
-                    # Parse the in_hand_date if provided
+                    # Parse dates
                     in_hand_date = None
                     if row.get('in_hand_date') and row['in_hand_date'].strip():
                         try:
@@ -220,12 +231,13 @@ def import_events():
                     event = Event(
                         website=row['website'].strip(),
                         event_id=row['event_id'].strip(),
-                        todaytix_event_id=row['todaytix_event_id'].strip() or None,
+                        todaytix_event_id=row['todaytix_event_id'].strip() if row.get('todaytix_event_id') else None,
+                        todaytix_show_id=row['todaytix_show_id'].strip() if row.get('todaytix_show_id') else None,
+                        ticketmaster_id=row['ticketmaster_id'].strip() if row.get('ticketmaster_id') else None,
                         event_name=row['event_name'].strip(),
                         city_id=city_id,
                         event_date=datetime.strptime(row['event_date'].strip(), '%Y-%m-%d').date(),
                         event_time=row['event_time'].strip(),
-                        todaytix_show_id=row['todaytix_show_id'].strip() or None,
                         venue_name=row['venue_name'].strip() or None,
                         markup=float(row['markup'].strip()),
                         stock_type=row['stock_type'].strip() if row.get('stock_type') else None,
@@ -263,7 +275,7 @@ def import_events():
         if 'temp_path' in locals():
             os.remove(temp_path)
         return jsonify({'error': str(e)}), 500
-
+    
 @bp.route('/api/events/export', methods=['GET'])
 @login_required
 def export_events():
@@ -277,8 +289,8 @@ def export_events():
         writer.writerow([
             'website', 'event_id', 'event_name', 'city', 
             'event_date', 'event_time', 'todaytix_event_id', 
-            'todaytix_show_id', 'venue_name', 'markup',
-            'stock_type', 'in_hand', 'in_hand_date'  # Added in_hand
+            'todaytix_show_id', 'ticketmaster_id', 'venue_name', 'markup',
+            'stock_type', 'in_hand', 'in_hand_date'
         ])
         
         # Write data
@@ -293,6 +305,7 @@ def export_events():
                 event.event_time,
                 event.todaytix_event_id or '',
                 event.todaytix_show_id or '',
+                event.ticketmaster_id or '',
                 event.venue_name or '',
                 f"{event.markup:.2f}",
                 event.stock_type or '',
