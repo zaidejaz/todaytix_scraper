@@ -2,7 +2,7 @@ from flask_apscheduler import APScheduler
 from datetime import datetime, timedelta
 from ..models.database import db, ScraperJob
 from ..todaytix.api import TodayTixAPI
-from ..todaytix.scraper import EventScraper
+from .scraper import EventScraper
 import logging
 
 logger = logging.getLogger(__name__)

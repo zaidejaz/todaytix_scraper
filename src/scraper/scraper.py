@@ -101,7 +101,7 @@ class EventScraper:
                 "taxed_cost": 0,
                 "cost": seat['price'],
                 "hide_seats": "Y",
-                "in_hand": "N",
+                "in_hand": event.in_hand or "N",
                 "in_hand_date": event.in_hand_date or in_hand_date,
                 "instant_transfer": "N",
                 "files_available": "N",

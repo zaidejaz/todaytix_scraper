@@ -1,4 +1,3 @@
-# events.py
 from datetime import datetime
 from io import StringIO
 from flask import Blueprint, jsonify, redirect, request, render_template, current_app, url_for
@@ -51,6 +50,11 @@ def create_event():
         if city_id not in [cid for cid in CITY_URL_MAP.values()]:
             return jsonify({'error': 'Invalid city ID'}), 400
 
+        # Validate in_hand value
+        in_hand = data.get('in_hand', 'N').strip().upper()
+        if in_hand not in ['Y', 'N']:
+            return jsonify({'error': 'Invalid in_hand value. Use Y or N'}), 400
+
         event = Event(
             website=data['website'],
             event_id=data['event_id'],
@@ -63,6 +67,7 @@ def create_event():
             venue_name=data.get('venue_name'),
             markup=float(data['markup']),
             stock_type=data.get('stock_type'),
+            in_hand=in_hand, 
             in_hand_date=datetime.strptime(data['in_hand_date'], '%Y-%m-%d').date() if data.get('in_hand_date') else None
         )
         db.session.add(event)
@@ -76,9 +81,15 @@ def create_event():
 @bp.route('/api/events/<int:id>', methods=['GET'])
 @login_required
 def get_event(id):
-    event = Event.query.get_or_404(id)
-    return jsonify(event.to_dict())
-
+    try:
+        current_app.logger.info(f"Fetching event with ID: {id}")
+        event = Event.query.get_or_404(id)
+        current_app.logger.info(f"Found event: {event.event_name}")
+        return jsonify(event.to_dict())
+    except Exception as e:
+        current_app.logger.error(f"Error fetching event {id}: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    
 @bp.route('/api/events/<int:id>', methods=['PUT'])
 @login_required
 def update_event(id):
@@ -91,6 +102,11 @@ def update_event(id):
         if city_id not in [cid for cid in CITY_URL_MAP.values()]:
             return jsonify({'error': 'Invalid city ID'}), 400
 
+        # Validate in_hand value
+        in_hand = data.get('in_hand', 'N').strip().upper()
+        if in_hand not in ['Y', 'N']:
+            return jsonify({'error': 'Invalid in_hand value. Use Y or N'}), 400
+
         event.website = data['website']
         event.event_id = data['event_id']
         event.todaytix_event_id = data.get('todaytix_event_id')
@@ -102,6 +118,7 @@ def update_event(id):
         event.venue_name = data.get('venue_name')
         event.markup = float(data['markup'])
         event.stock_type = data.get('stock_type')
+        event.in_hand = in_hand 
         event.in_hand_date = datetime.strptime(data['in_hand_date'], '%Y-%m-%d').date() if data.get('in_hand_date') else None
         
         db.session.commit()
@@ -128,14 +145,13 @@ def download_template():
     writer.writerow([
         'website', 'event_id', 'todaytix_event_id', 'event_name', 'city', 
         'event_date', 'event_time', 'todaytix_show_id', 'venue_name', 'markup',
-        'stock_type', 'in_hand_date' 
+        'stock_type', 'in_hand', 'in_hand_date' 
     ])
     
-    # Add sample row
     writer.writerow([
         'TodayTix', 'EVT_001', '123456', 'Sample Event', 'New York', 
         '2024-01-01', '19:30', '789', 'Sample Theater', '1.6',
-        'ELECTRONIC', '2025-02-12' 
+        'ELECTRONIC', 'N', '2025-02-12'
     ])
     
     output.seek(0)
@@ -195,6 +211,12 @@ def import_events():
                             errors.append(f"Row {row_num}: Invalid in_hand_date format. Use YYYY-MM-DD")
                             continue
 
+                    # Validate in_hand value
+                    in_hand = row.get('in_hand', '').strip().upper()
+                    if in_hand and in_hand not in ['Y', 'N']:
+                        errors.append(f"Row {row_num}: Invalid in_hand value. Use 'Y' or 'N'")
+                        continue
+
                     event = Event(
                         website=row['website'].strip(),
                         event_id=row['event_id'].strip(),
@@ -207,6 +229,7 @@ def import_events():
                         venue_name=row['venue_name'].strip() or None,
                         markup=float(row['markup'].strip()),
                         stock_type=row['stock_type'].strip() if row.get('stock_type') else None,
+                        in_hand=in_hand or 'N',
                         in_hand_date=in_hand_date
                     )
                     
@@ -255,7 +278,7 @@ def export_events():
             'website', 'event_id', 'event_name', 'city', 
             'event_date', 'event_time', 'todaytix_event_id', 
             'todaytix_show_id', 'venue_name', 'markup',
-            'stock_type', 'in_hand_date'  
+            'stock_type', 'in_hand', 'in_hand_date'  # Added in_hand
         ])
         
         # Write data
@@ -273,6 +296,7 @@ def export_events():
                 event.venue_name or '',
                 f"{event.markup:.2f}",
                 event.stock_type or '',
+                event.in_hand or 'N',
                 event.in_hand_date.strftime('%Y-%m-%d') if event.in_hand_date else ''
             ])
         

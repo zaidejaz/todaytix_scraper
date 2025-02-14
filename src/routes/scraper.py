@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from flask_login import login_required
 from src.scraper.scheduler import scheduler, ScraperScheduler
 from ..todaytix.api import TodayTixAPI
-from ..todaytix.scraper import EventScraper
+from ..scraper.scraper import EventScraper
 from ..models.database import Event, ScraperJob, db
 from pathlib import Path
 from werkzeug.utils import secure_filename

@@ -12,6 +12,7 @@ class Event(db.Model):
     event_id = db.Column(db.String(255), nullable=False, unique=True)
     todaytix_event_id = db.Column(db.String(255), nullable=True)
     todaytix_show_id = db.Column(db.String(255), nullable=True)
+    ticketmaster_id = db.Column(db.String(255), nullable=True) 
     event_name = db.Column(db.String(255), nullable=False)
     city_id = db.Column(db.Integer, nullable=False)
     event_date = db.Column(db.Date, nullable=False)
@@ -20,6 +21,7 @@ class Event(db.Model):
     markup = db.Column(db.Float, nullable=False, default=1.6)
     stock_type = db.Column(db.String(50), nullable=True) 
     in_hand_date = db.Column(db.Date, nullable=True)   
+    in_hand = db.Column(db.String(25), nullable=True)
     created_at = db.Column(db.DateTime, server_default=func.now())
     updated_at = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -46,6 +48,7 @@ class Event(db.Model):
             'markup': self.markup,
             'stock_type': self.stock_type,
             'in_hand_date': self.in_hand_date.isoformat() if self.in_hand_date else None,
+            'in_hand': self.in_hand,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
