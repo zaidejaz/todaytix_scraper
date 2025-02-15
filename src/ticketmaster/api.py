@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import requests
 import logging
@@ -12,6 +13,7 @@ class TicketmasterAPI:
     def __init__(self):
         self.api_key = os.getenv('TICKETMASTER_API_KEY')
         self.api_secret = os.getenv('TICKETMASTER_API_SECRET')
+        self.consumer_api = os.getenv('TICKETMASTER_CONSUMER_API')
         if not all([self.api_key, self.api_secret]):
             raise ValueError("Missing Ticketmaster API configuration in environment")
 
@@ -31,6 +33,107 @@ class TicketmasterAPI:
             'Cache-Control': 'no-cache',
             'TE': 'trailers'
         }
+
+    def search_events(self, ticketmaster_id: str, event_name: str, location: str, start_date: str, end_date: str) -> List[Dict]:
+        """
+        Search for events using the Ticketmaster Discovery API.
+    
+        Args:
+            ticketmaster_id (str): Ticketmaster ID for the event
+            event_name (str): Name/keyword of the event to search for
+            location (str): City name
+            start_date (str): Start date in YYYY-MM-DD format  
+            end_date (str): End date in YYYY-MM-DD format
+    
+        Returns:
+            List[Dict]: List of matching events with relevant details
+        """
+        try:
+            base_url = 'https://app.ticketmaster.com/discovery/v2/events'
+            processed_events = []
+            page = 0
+            
+            # Convert input dates to datetime objects for comparison
+            start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
+            end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
+            
+            # Normalize event name for comparison
+            normalized_event_name = event_name.lower().strip()
+            
+            while True:
+                query_params = {
+                    'apikey': self.consumer_api,
+                    'keyword': event_name,
+                    'locale': '*',
+                    'city': location,
+                    'size': 200,
+                    'page': page
+                }
+    
+                # Make request
+                response = requests.get(
+                    base_url,
+                    params=query_params,
+                    headers=self.headers
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                if '_embedded' not in data or 'events' not in data['_embedded']:
+                    break
+                
+                events = data['_embedded']['events']
+                if not events:
+                    break
+                
+                # Process events and filter by date and exact name match
+                for event in events:
+                    try:
+                        # Check for exact name match (case-insensitive)
+                        event_name_from_api = event.get('name', '').lower().strip()
+                        if event_name_from_api != normalized_event_name:
+                            continue
+                            
+                        event_date = datetime.strptime(
+                            event['dates']['start'].get('localDate', ''),
+                            '%Y-%m-%d'
+                        )
+                        
+                        # Check if event is within date range
+                        if start_datetime <= event_date <= end_datetime:
+                            event_info = {
+                                'website': 'Ticketmaster',
+                                'event_id': '',
+                                'ticketmaster_event_id': ticketmaster_id,
+                                'event_name': event.get('name', ''),
+                                'city': location,
+                                'event_date': event['dates']['start'].get('localDate', ''),
+                                'event_time': event['dates']['start'].get('localTime', ''),
+                                'venue_name': event['_embedded']['venues'][0].get('name', '') if event.get('_embedded', {}).get('venues') else '',
+                                'markup': '1.6'
+                            }
+                            processed_events.append(event_info)
+                    except (ValueError, KeyError) as e:
+                        logger.error(f"Error processing event: {str(e)}")
+                        continue
+                    
+                # Check if we need to go to next page
+                page_info = data.get('page', {})
+                total_pages = page_info.get('totalPages', 0)
+                current_page = page_info.get('number', 0)
+                
+                if current_page >= total_pages - 1:
+                    break
+                    
+                page += 1
+    
+            return processed_events
+    
+        except requests.RequestException as e:
+            logger.error(f"Error searching events: {str(e)}")
+            if 'response' in locals() and hasattr(response, 'text'):
+                logger.error(f"Response content: {response.text}")
+            return []
 
     def get_seats(self, event_id: str) -> List[Dict]:
         """Get available seats for a specific event."""
