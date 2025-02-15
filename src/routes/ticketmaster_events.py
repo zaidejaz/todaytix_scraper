@@ -17,13 +17,12 @@ def ticketmaster_events_page():
 def search_events():
     try:
         data = request.json
-        ticketmaster_id = data.get('ticketmaster_id')
         event_name = data.get('event_name')
         city = data.get('city')
         start_date = datetime.strptime(data.get('start_date'), '%Y-%m-%d').date()
         end_date = datetime.strptime(data.get('end_date'), '%Y-%m-%d').date()
 
-        if not all([ticketmaster_id, event_name, city, start_date, end_date]):
+        if not all([event_name, city, start_date, end_date]):
             return jsonify({
                 'status': 'error',
                 'message': 'All fields are required'
@@ -31,7 +30,6 @@ def search_events():
 
         api = TicketmasterAPI()
         events = api.search_events(
-            ticketmaster_id=ticketmaster_id,
             event_name=event_name,
             location=city,
             start_date=data.get('start_date'),

@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+import re
 import requests
 import logging
 import uuid
@@ -34,17 +35,16 @@ class TicketmasterAPI:
             'TE': 'trailers'
         }
 
-    def search_events(self, ticketmaster_id: str, event_name: str, location: str, start_date: str, end_date: str) -> List[Dict]:
+    def search_events(self, event_name: str, location: str, start_date: str, end_date: str) -> List[Dict]:
         """
         Search for events using the Ticketmaster Discovery API.
-    
+
         Args:
-            ticketmaster_id (str): Ticketmaster ID for the event
             event_name (str): Name/keyword of the event to search for
             location (str): City name
             start_date (str): Start date in YYYY-MM-DD format  
             end_date (str): End date in YYYY-MM-DD format
-    
+
         Returns:
             List[Dict]: List of matching events with relevant details
         """
@@ -52,14 +52,14 @@ class TicketmasterAPI:
             base_url = 'https://app.ticketmaster.com/discovery/v2/events'
             processed_events = []
             page = 0
-            
+
             # Convert input dates to datetime objects for comparison
             start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
             end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
-            
+
             # Normalize event name for comparison
             normalized_event_name = event_name.lower().strip()
-            
+
             while True:
                 query_params = {
                     'apikey': self.consumer_api,
@@ -69,8 +69,7 @@ class TicketmasterAPI:
                     'size': 200,
                     'page': page
                 }
-    
-                # Make request
+
                 response = requests.get(
                     base_url,
                     params=query_params,
@@ -78,14 +77,14 @@ class TicketmasterAPI:
                 )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 if '_embedded' not in data or 'events' not in data['_embedded']:
                     break
-                
+
                 events = data['_embedded']['events']
                 if not events:
                     break
-                
+
                 # Process events and filter by date and exact name match
                 for event in events:
                     try:
@@ -93,12 +92,21 @@ class TicketmasterAPI:
                         event_name_from_api = event.get('name', '').lower().strip()
                         if event_name_from_api != normalized_event_name:
                             continue
-                            
+
                         event_date = datetime.strptime(
                             event['dates']['start'].get('localDate', ''),
                             '%Y-%m-%d'
                         )
-                        
+
+                        # Extract Ticketmaster ID from URL
+                        ticketmaster_id = ''
+                        event_url = event.get('url', '')
+                        if event_url:
+                            # Try to extract ID from the end of the URL
+                            id_match = re.search(r'/event/([A-Z0-9]+)(?:\?|$)', event_url)
+                            if id_match:
+                                ticketmaster_id = id_match.group(1)
+
                         # Check if event is within date range
                         if start_datetime <= event_date <= end_datetime:
                             event_info = {
@@ -116,19 +124,19 @@ class TicketmasterAPI:
                     except (ValueError, KeyError) as e:
                         logger.error(f"Error processing event: {str(e)}")
                         continue
-                    
+
                 # Check if we need to go to next page
                 page_info = data.get('page', {})
                 total_pages = page_info.get('totalPages', 0)
                 current_page = page_info.get('number', 0)
-                
+
                 if current_page >= total_pages - 1:
                     break
-                    
+
                 page += 1
-    
+
             return processed_events
-    
+
         except requests.RequestException as e:
             logger.error(f"Error searching events: {str(e)}")
             if 'response' in locals() and hasattr(response, 'text'):

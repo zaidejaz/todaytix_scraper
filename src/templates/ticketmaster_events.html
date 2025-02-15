@@ -8,11 +8,6 @@
         <form id="searchForm" class="space-y-6">
             <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
                 <div>
-                    <label class="block text-sm font-medium text-gray-700">Ticketmaster ID</label>
-                    <input type="text" id="ticketmasterId" name="ticketmaster_id" required
-                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                </div>
-                <div>
                     <label class="block text-sm font-medium text-gray-700">Event Name</label>
                     <input type="text" id="eventName" name="event_name" required
                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
@@ -66,7 +61,6 @@ document.getElementById('searchForm').addEventListener('submit', async (e) => {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                ticketmaster_id: formData.get('ticketmaster_id'),
                 event_name: formData.get('event_name'),
                 city: formData.get('city'),
                 start_date: formData.get('start_date'),
